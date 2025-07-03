@@ -149,7 +149,7 @@ if platform.system() == "Darwin":
     TOOLSET = "10.9" if USE_OCCT else "10.6"
 
 
-IFCOS_NUM_BUILD_PROCS = os.getenv("IFCOS_NUM_BUILD_PROCS", multiprocessing.cpu_count() + 1)
+IFCOS_NUM_BUILD_PROCS = os.getenv("IFCOS_NUM_BUILD_PROCS", 3)
 
 CMAKE_DIR = os.path.realpath(os.path.join(os.path.dirname(__file__), "..", "cmake"))
 

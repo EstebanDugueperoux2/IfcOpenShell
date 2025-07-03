@@ -1,0 +1,39 @@
+name: Build IfcOpenShell as a conan package
+
+on:
+  workflow_dispatch:
+
+    # Take example from https://github.com/QuTech-Delft/libqasm/blob/develop/.github/workflows/assets.yaml
+jobs:
+  conan:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    - name: Setup Conan Client
+      uses: conan-io/setup-conan@v1
+      with:
+        cache_packages: true
+    - name: Install Conan dependencies
+      run: conan install . --build=
+
+  build_wheels:
+    name: Build wheels on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        # macos-13 is an intel runner, macos-14 is apple silicon
+        os: [ubuntu-latest, ubuntu-24.04-arm, windows-latest, macos-13, macos-14]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v2.23.2
+        # env:
+        #   CIBW_SOME_OPTION: value
+        #    ...
+        # with:
+        #   package-dir: .
+        #   output-dir: wheelhouse
+        #   config-file: "{package}/pyproject.toml"

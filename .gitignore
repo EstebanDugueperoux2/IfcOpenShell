@@ -3,7 +3,7 @@
 /_build-vs*-x*/
 /_deps-vs*-x*-installed/
 /_installed-vs*-x*/
-/build/
+build/
 
 # output directories
 /cmake/out/
@@ -49,6 +49,7 @@ instance/*
 # pipenv
 Pipfile
 Pipfile.lock
+venv/
 
 # Database
 *.db
@@ -108,3 +109,5 @@ src/bonsai/bonsai/bim/schema/Brick.ttl
 
 bonsaiDecoratorForLoads.code-workspace
 
+# conan
+.conan/

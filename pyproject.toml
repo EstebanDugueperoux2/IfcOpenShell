@@ -1,3 +1,17 @@
+[project]
+dynamic = ["version"]
+
+[build-system]
+requires = [
+    "conan>=2.0.0",
+    "setuptools",
+    "scikit-build>=0.17.3",
+    "skbuild-conan",
+    "cmake>=3.23",
+    "ninja",
+]
+build-backend = "setuptools.build_meta"
+
 [tool.black]
 line-length = 120
 include = "src/.*.pyi?$"
@@ -16,47 +30,6 @@ extend-exclude = '''
 reportInvalidTypeForm = false
 disableBytesTypePromotions = true
 reportUnnecessaryTypeIgnoreComment = true
-# Just to add a quick insert of `# pyright: ignore[xxx]` comments in Pylance.
-enableTypeIgnoreComments = false
 
-# Define here general ruff settings,
-# then they will be inherited projects .toml files.
-# This allows using assuming different Python version for different projects.
-[tool.ruff]
-exclude = [
-    # Submodules.
-    "src/ifcconvert/cityjson",
-    "src/ifcopenshell-python/ifcopenshell/express",
-    "src/ifcopenshell-python/ifcopenshell/mvd",
-    "src/ifcopenshell-python/ifcopenshell/simple_spf",
-    "src/svgfill",
-    #
-    # Unformatted.
-    "src/exterior-shell-extractor",
-    # Incompatible with linter.
-    "src/ifc2ca/templates",
-]
-[tool.ruff.lint]
-select = [
-    # Default Ruff rules.
-    # "E4",  # imports
-    # "E7",  # statements
-    "E9",  # io errors
-    # "F",  # pyflakes
-    #
-    "FA",  # future annotations
-    "UP",  # pyupgrade
-]
-ignore = [
-    "FA100", # Conflicts with Blender using annotations for props definitions.
-    # Maybe will enable later:
-    "UP007", # Optional to X | Y
-    "UP015", # Unnecessary mode argument
-    "UP028", # yield for -> yield from
-    "UP030", # implicit references for positional format fields
-    "UP031", # Replace % with .format
-    "UP032", # Replace .format with f-string
-
-    # Deprecated Ruff rules.
-    "UP038", # Use X | Y in isinstance
-]
+[tool.cibuildwheel]
+before-all = "uname -a"

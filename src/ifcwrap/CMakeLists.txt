@@ -35,12 +35,12 @@ ENDIF()
 
 # NOTE PYTHONLIBS_FOUND and PYTHONINTERP_FOUND cannot seem to be trusted so
 # we need further checks to see whether the packages were actually found or not.
-FIND_PACKAGE(PythonLibs)
-IF(NOT PYTHONLIBS_FOUND OR "$PYTHON_INCLUDE_DIRS}" STREQUAL "")
+find_package (Python3 REQUIRED COMPONENTS Interpreter Development)
+IF(NOT Python3_FOUND OR "$Python3_INCLUDE_DIRS}" STREQUAL "")
 	MESSAGE(FATAL_ERROR "BUILD_IFCPYTHON enabled, but unable to find Python lib or header. Disable BUILD_IFCPYTHON or fix Python paths to proceed.")
 ENDIF()
 
-INCLUDE_DIRECTORIES(${PYTHON_INCLUDE_DIRS})
+INCLUDE_DIRECTORIES(${Python3_INCLUDE_DIRS})
 INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR})
 
 SET(CMAKE_SWIG_FLAGS ${SWIG_DEFINES})
@@ -71,9 +71,9 @@ swig_add_library(ifcopenshell_wrapper LANGUAGE python SOURCES IfcPython.i)
 SET_PROPERTY(TARGET ${SWIG_MODULE_ifcopenshell_wrapper_REAL_NAME} PROPERTY SWIG_DEPENDS ${IFCOPENSHELL_LIBRARIES})
 if("$ENV{LDFLAGS}" MATCHES ".undefined.suppress")
 # On osx there is some state in the python dylib. With `-Wl,undefined,suppress` we can ignore the missing symbols at compile time.
-SWIG_LINK_LIBRARIES(ifcopenshell_wrapper ${IFCOPENSHELL_LIBRARIES} ${OPENCASCADE_LIBRARIES} ${Boost_LIBRARIES} ${LIBSVGFILL})
+target_link_libraries(ifcopenshell_wrapper ${IFCOPENSHELL_LIBRARIES} ${OPENCASCADE_LIBRARIES} ${Boost_LIBRARIES} ${LIBSVGFILL})
 else()
-SWIG_LINK_LIBRARIES(ifcopenshell_wrapper ${IFCOPENSHELL_LIBRARIES} ${PYTHON_LIBRARIES} ${LIBSVGFILL})
+target_link_libraries(ifcopenshell_wrapper ${IFCOPENSHELL_LIBRARIES} ${PYTHON_LIBRARIES} ${LIBSVGFILL})
 endif()
 if ((NOT WIN32) AND BUILD_SHARED_LIBS)
     SET_INSTALL_RPATHS(${SWIG_MODULE_ifcopenshell_wrapper_REAL_NAME} "${IFCDIRS};${OCC_LIBRARY_DIR}")
@@ -81,13 +81,12 @@ endif()
 
 # Try to find the Python interpreter to get the site-packages
 # directory in which the wrapper can be installed.
-FIND_PACKAGE(PythonInterp)
-IF((PYTHONINTERP_FOUND AND NOT "${PYTHON_EXECUTABLE}" STREQUAL "") OR PYTHON_MODULE_INSTALL_DIR)
+IF((Python3_Interpreter_FOUND AND NOT "${Python3_EXECUTABLE}" STREQUAL "") OR PYTHON_MODULE_INSTALL_DIR)
     if (NOT WASM_BUILD)
     # Find Python interpreter and get its version
     # Not on WASM because we're cross compiling in that case
     EXECUTE_PROCESS(
-        COMMAND ${PYTHON_EXECUTABLE} -c "import sysconfig; print(sysconfig.get_config_var('EXT_SUFFIX'))"
+        COMMAND ${Python3_EXECUTABLE} -c "import sysconfig; print(sysconfig.get_config_var('EXT_SUFFIX'))"
         OUTPUT_VARIABLE PYTHON_EXTENSION_SUFFIX
         OUTPUT_STRIP_TRAILING_WHITESPACE
     )
@@ -111,28 +110,28 @@ IF((PYTHONINTERP_FOUND AND NOT "${PYTHON_EXECUTABLE}" STREQUAL "") OR PYTHON_MOD
             set(python_package_dir ${CMAKE_INSTALL_LIBDIR}/python${PYTHON_VERSION_MAJOR}/dist-packages/)
         endif()
     endif()
-    IF("${python_package_dir}" STREQUAL "")
-        MESSAGE(WARNING "Unable to locate Python site-package directory, unable to install the Python wrapper")
-    ELSE()
-        FILE(GLOB_RECURSE sourcefiles 
-            "${CMAKE_CURRENT_SOURCE_DIR}/../ifcopenshell-python/ifcopenshell/*"
-        )
-        FOREACH(file ${sourcefiles})
-            FILE(RELATIVE_PATH relative "${CMAKE_CURRENT_SOURCE_DIR}/../ifcopenshell-python/ifcopenshell/" "${file}")
-            GET_FILENAME_COMPONENT(dir "${relative}" DIRECTORY)
-            if(NOT IS_DIRECTORY "${file}")
-			    INSTALL(FILES "${file}"
-                        DESTINATION "${python_package_dir}/ifcopenshell/${dir}")
-            endif()
-        ENDFOREACH()
-        INSTALL(FILES "${CMAKE_BINARY_DIR}/ifcwrap/ifcopenshell_wrapper.py"
-                DESTINATION "${python_package_dir}/ifcopenshell")
-        INSTALL(TARGETS ${SWIG_MODULE_ifcopenshell_wrapper_REAL_NAME}
-                DESTINATION "${python_package_dir}/ifcopenshell")
-	if (MSVC)
-	    INSTALL(FILES $<TARGET_PDB_FILE:${SWIG_MODULE_ifcopenshell_wrapper_REAL_NAME}> DESTINATION bin OPTIONAL)
-	endif()
-    ENDIF()
+    # IF("${python_package_dir}" STREQUAL "")
+    #     MESSAGE(WARNING "Unable to locate Python site-package directory, unable to install the Python wrapper")
+    # ELSE()
+    #     FILE(GLOB_RECURSE sourcefiles 
+    #         "${CMAKE_CURRENT_SOURCE_DIR}/../ifcopenshell-python/ifcopenshell/*"
+    #     )
+    #     FOREACH(file ${sourcefiles})
+    #         FILE(RELATIVE_PATH relative "${CMAKE_CURRENT_SOURCE_DIR}/../ifcopenshell-python/ifcopenshell/" "${file}")
+    #         GET_FILENAME_COMPONENT(dir "${relative}" DIRECTORY)
+    #         if(NOT IS_DIRECTORY "${file}")
+	# 		    INSTALL(FILES "${file}"
+    #                     DESTINATION "${python_package_dir}/ifcopenshell/${dir}")
+    #         endif()
+    #     ENDFOREACH()
+    #     INSTALL(FILES "${CMAKE_BINARY_DIR}/ifcwrap/ifcopenshell_wrapper.py"
+    #             DESTINATION "${python_package_dir}/ifcopenshell")
+    #     INSTALL(TARGETS ${SWIG_MODULE_ifcopenshell_wrapper_REAL_NAME}
+    #             DESTINATION "${python_package_dir}/ifcopenshell")
+	# if (MSVC)
+	#     INSTALL(FILES $<TARGET_PDB_FILE:${SWIG_MODULE_ifcopenshell_wrapper_REAL_NAME}> DESTINATION bin OPTIONAL)
+	# endif()
+    # ENDIF()
 ELSE()
     MESSAGE(WARNING "No Python interpreter found, unable to install the Python wrapper")
 ENDIF()

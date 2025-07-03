@@ -1,0 +1,11 @@
+# TKernel TKMath TKCDF TKExpress opencascade::occt_foundationclasses TKG2d TKService TKLCAF opencascade::occt_detools TKG3d TKOpenGl TKBinL TKXmlL TKStdL TKTObj TKGeomBase TKBinTObj TKXmlTObj TKBRep opencascade::occt_modelingdata TKGeomAlgo TKDE TKTopAlgo TKPrim TKHLR TKShHealing TKBO TKMesh TKXSBase TKBool TKXMesh TKV3d TKCAF TKDraw TKFillet TKFeat TKMeshVS TKBin TKXml TKStd TKVCAF TKOffset opencascade::occt_visualization opencascade::occt_applicationframework TKXCAF opencascade::occt_modelingalgorithms TKDESTEP TKDEIGES TKDESTL TKXmlXCAF TKBinXCAF TKRWMesh TKTopTest TKDEVRML TKDECascade TKDEOBJ TKDEGLTF TKDEPLY TKViewerTest opencascade::occt_dataexchange TKOpenGlTest TKDCAF TKXSDRAW TKTObjDRAW TKXDEDRAW TKQADraw TKXSDRAWDE TKXSDRAWGLTF TKXSDRAWIGES TKXSDRAWOBJ TKXSDRAWPLY TKXSDRAWSTEP TKXSDRAWSTL TKXSDRAWVRML opencascade::occt_draw
+# get_target_property(OPENCASCADE_INCLUDES TKernel INCLUDE_DIRECTORIES)
+# message(STATUS "OPENCASCADE_INCLUDES: ${OPENCASCADE_INCLUDES}")
+foreach(schema ${SCHEMA_VERSIONS})
+    add_library(geometry_serializer_ifc${schema} OBJECT Serialization.cpp)
+    target_link_libraries(geometry_serializer_ifc${schema} ${OPENCASCADE_LIBRARIES})
+    # target_include_directories(geometry_serializer_ifc${schema} PRIVATE ${OPENCASCADE_INCLUDES})
+    set_target_properties(geometry_serializer_ifc${schema} PROPERTIES COMPILE_FLAGS "-DIFC_GEOM_EXPORTS -DIfcSchema=Ifc${schema}")
+    list(APPEND geometry_serializer_libraries geometry_serializer_ifc${schema})
+endforeach()
+set_property(GLOBAL PROPERTY geometry_serializer_libraries ${geometry_serializer_libraries})
