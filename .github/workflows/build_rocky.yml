@@ -40,7 +40,6 @@ jobs:
           path: ./build
           ref: rockylinux8-x64
           lfs: true
-          token: ${{ secrets.BUILD_REPO_TOKEN }}
 
       - name: Unpack Dependencies
         run: |
