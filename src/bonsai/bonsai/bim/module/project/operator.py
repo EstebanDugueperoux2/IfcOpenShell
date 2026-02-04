@@ -16,58 +16,63 @@
 # You should have received a copy of the GNU General Public License
 # along with Bonsai.  If not, see <http://www.gnu.org/licenses/>.
 
-import os
-import bpy
-import time
+import datetime
 import json
 import logging
-import tempfile
-import traceback
+import os
 import subprocess
-import datetime
-import ifcopenshell.api.attribute
-import numpy as np
+import tempfile
+import time
+import traceback
+from collections import defaultdict
+from math import radians
+from pathlib import Path
+from typing import TYPE_CHECKING, Literal, Union, get_args
+
+import bpy
 import ifcopenshell
 import ifcopenshell.api
+import ifcopenshell.api.attribute
 import ifcopenshell.api.nest
 import ifcopenshell.api.project
 import ifcopenshell.api.root
 import ifcopenshell.geom
 import ifcopenshell.ifcopenshell_wrapper as W
+import ifcopenshell.util.element
 import ifcopenshell.util.file
-import ifcopenshell.util.selector
 import ifcopenshell.util.geolocation
 import ifcopenshell.util.representation
-import ifcopenshell.util.element
-import ifcopenshell.util.representation
+import ifcopenshell.util.selector
 import ifcopenshell.util.shape
 import ifcopenshell.util.shape_builder
 import ifcopenshell.util.unit
+import numpy as np
+from bpy.app.handlers import persistent
+from bpy_extras.io_utils import ExportHelper, ImportHelper
+from ifcopenshell.geom import ShapeElementType
+from mathutils import Matrix, Vector
+
 import bonsai.bim.handler
 import bonsai.bim.helper
 import bonsai.bim.schema
-import bonsai.tool as tool
 import bonsai.core.project as core
-from bpy_extras.io_utils import ExportHelper, ImportHelper
+import bonsai.tool as tool
+from bonsai.bim import export_ifc, import_ifc
 from bonsai.bim.ifc import IfcStore
-from bonsai.bim.ui import IFCFileSelector
-from bonsai.bim import import_ifc
-from bonsai.bim import export_ifc
-from math import radians
-from pathlib import Path
-from collections import defaultdict
-from mathutils import Vector, Matrix
-from bpy.app.handlers import persistent
-from ifcopenshell.geom import ShapeElementType
-from bonsai.bim.module.project.data import LinksData, ProjectLibraryData
-from bonsai.bim.module.project.decorator import ProjectDecorator, ClippingPlaneDecorator, MeasureDecorator
-from bonsai.bim.module.project.prop import BreadcrumbType
-from bonsai.bim.module.model.decorator import PolylineDecorator, FaceAreaDecorator
+from bonsai.bim.module.model.decorator import FaceAreaDecorator, PolylineDecorator
 from bonsai.bim.module.model.polyline import PolylineOperator
-from typing import Union, TYPE_CHECKING, get_args, Literal
+from bonsai.bim.module.project.data import LinksData, ProjectLibraryData
+from bonsai.bim.module.project.decorator import (
+    ClippingPlaneDecorator,
+    MeasureDecorator,
+    ProjectDecorator,
+)
+from bonsai.bim.module.project.prop import BreadcrumbType
+from bonsai.bim.ui import IFCFileSelector
 
 if TYPE_CHECKING:
     import bpy.stub_internal.rna_enums as rna_enums
+
     from bonsai.bim.module.project.prop import Link
 
 
@@ -119,8 +124,6 @@ class NewProject(bpy.types.Operator):
             bpy.context.scene.unit_settings.length_unit = "MILLIMETERS"
             bim_props.area_unit = "SQUARE_METRE"
             bim_props.volume_unit = "CUBIC_METRE"
-            bim_props.mass_unit = "KILOGRAM"
-            bim_props.time_unit = "SECOND"
             pprops.template_file = "IFC4 Demo Template.ifc"
 
         if self.preset != "wizard":
@@ -1062,18 +1065,34 @@ class LoadProject(bpy.types.Operator, IFCFileSelector, ImportHelper):
             and not self.is_advanced
         ):
             filepath = self.get_filepath()
-            suffix = tool.Blender.get_addon_preferences().metadata_blend_file_suffix
-            if str(filepath).lower().endswith(".ifc"):
-                metadata_path = Path(str(filepath)[:-4] + suffix)
-            else:
-                metadata_path = Path(str(filepath) + suffix)
-            if metadata_path.exists() and metadata_path.is_file():
-                try:
-                    bpy.ops.bim.load_blend_metadata_and_ifc(filepath=filepath)
-                    self.report({"INFO"}, f"Loaded metadata file: {metadata_path.name}")
-                    return {"FINISHED"}
-                except Exception as e:
-                    self.report({"WARNING"}, f"Failed to load metadata file, using regular load: {e}")
+
+            # First, load the IFC file temporarily to check for metadata document
+            temp_ifc = None
+            has_metadata_doc = False
+            try:
+                temp_ifc = ifcopenshell.open(str(filepath))
+                for doc in temp_ifc.by_type("IfcDocumentInformation"):
+                    if getattr(doc, "Scope", None) == "BLEND_METADATA":
+                        has_metadata_doc = True
+                        break
+            except:
+                pass
+            finally:
+                temp_ifc = None
+
+            if has_metadata_doc:
+                suffix = tool.Blender.get_addon_preferences().metadata_blend_file_suffix
+                if str(filepath).lower().endswith(".ifc"):
+                    metadata_path = Path(str(filepath)[:-4] + suffix)
+                else:
+                    metadata_path = Path(str(filepath) + suffix)
+                if metadata_path.exists() and metadata_path.is_file():
+                    try:
+                        bpy.ops.bim.load_blend_metadata_and_ifc(filepath=filepath)
+                        self.report({"INFO"}, f"Loaded metadata file: {metadata_path.name}")
+                        return {"FINISHED"}
+                    except Exception as e:
+                        self.report({"WARNING"}, f"Failed to load metadata file, using regular load: {e}")
 
         @persistent
         def load_handler(*args):
@@ -1121,6 +1140,10 @@ class LoadProject(bpy.types.Operator, IFCFileSelector, ImportHelper):
             props.is_loading = True
             props.total_elements = len(tool.Ifc.get().by_type("IfcElement"))
             props.use_relative_project_path = self.use_relative_path
+
+            metadata_doc = tool.Project.get_metadata_document_information()
+            props.should_save_metadata_for_this_file = metadata_doc is not None
+
             tool.Blender.register_toolbar()
             tool.Project.add_recent_ifc_project(self.get_filepath_abs())
 
@@ -1749,6 +1772,22 @@ class ExportIFC(bpy.types.Operator, ExportHelper):
         settings.json_version = self.json_version
         settings.json_compact = self.json_compact
 
+        pprops = tool.Project.get_project_props()
+        if tool.Blender.get_addon_preferences().save_metadata_blend_file and pprops.should_save_metadata_for_this_file:
+            suffix = tool.Blender.get_addon_preferences().metadata_blend_file_suffix
+            if output_file.lower().endswith(".ifc"):
+                metadata_filename = os.path.basename(output_file)[:-4] + suffix
+            else:
+                metadata_filename = os.path.basename(output_file) + suffix
+
+            if not tool.Project.get_metadata_document_information():
+                tool.Project.create_metadata_document_information(metadata_filename)
+            else:
+                tool.Project.update_metadata_document_information(metadata_filename)
+        else:
+            if not pprops.should_save_metadata_for_this_file:
+                tool.Project.remove_metadata_document_information()
+
         ifc_exporter = export_ifc.IfcExporter(settings)
         print("Starting export")
         settings.logger.info("Starting export")
@@ -1765,7 +1804,8 @@ class ExportIFC(bpy.types.Operator, ExportHelper):
             tool.Ifc.set_path(output_file)
         bim_props.is_dirty = False
 
-        if tool.Blender.get_addon_preferences().save_metadata_blend_file:
+        pprops = tool.Project.get_project_props()
+        if tool.Blender.get_addon_preferences().save_metadata_blend_file and pprops.should_save_metadata_for_this_file:
             try:
                 bpy.ops.bim.save_blend_metadata_file()
                 suffix = tool.Blender.get_addon_preferences().metadata_blend_file_suffix
@@ -1813,8 +1853,9 @@ class LoadLinkedProject(bpy.types.Operator, ImportHelper):
         return ImportHelper.invoke(self, context, event)
 
     def execute(self, context):
-        import ifcpatch
         import multiprocessing
+
+        import ifcpatch
 
         start = time.time()
 
@@ -2125,7 +2166,11 @@ class QueryLinkedElement(bpy.types.Operator):
 
     def execute(self, context):
         import sqlite3
-        from bpy_extras.view3d_utils import region_2d_to_vector_3d, region_2d_to_origin_3d
+
+        from bpy_extras.view3d_utils import (
+            region_2d_to_origin_3d,
+            region_2d_to_vector_3d,
+        )
 
         LinksData.linked_data = {}
         props = tool.Project.get_project_props()
@@ -2470,8 +2515,9 @@ class RefreshClippingPlanes(bpy.types.Operator):
                 break
 
     def refresh_clipping_planes(self, context):
-        import bmesh
         from itertools import cycle
+
+        import bmesh
 
         area = next(a for a in bpy.context.screen.areas if a.type == "VIEW_3D")
         region = next(r for r in area.regions if r.type == "WINDOW")
@@ -2532,7 +2578,10 @@ class CreateClippingPlane(bpy.types.Operator):
     bl_options = {"REGISTER", "UNDO"}
 
     def execute(self, context):
-        from bpy_extras.view3d_utils import region_2d_to_vector_3d, region_2d_to_origin_3d
+        from bpy_extras.view3d_utils import (
+            region_2d_to_origin_3d,
+            region_2d_to_vector_3d,
+        )
 
         # Clean up deleted planes
         props = tool.Project.get_project_props()
@@ -2686,17 +2735,27 @@ class IFCFileHandlerOperator(bpy.types.Operator):
         # Keeping code in .invoke() as we'll probably add some
         # popup windows later.
 
+        def clean_up_path(path: str) -> str:
+            # In Blender 4.5.6 there was a bug producing unncesseary double slash prefix
+            # breaking the paths. Issue is not present in 5.0+ and presumably will be solved in 4.5.7 too.
+            # https://projects.blender.org/blender/blender/issues/153822
+            if bpy.app.version == (4, 5, 6):
+                blender_prefix = "//"
+                if path.startswith(blender_prefix):
+                    return path.removeprefix(blender_prefix)
+            return path
+
         # `files` contain only .ifc files.
         filepath = Path(self.directory)
         # If user is just drag'n'dropping a single file -> load it as a new project,
         # if they're holding ALT -> link the file/files to the current project.
         if event.alt:
             # Passing self.files directly results in TypeError.
-            serialized_files = [{"name": f.name} for f in self.files]
+            serialized_files = [{"name": clean_up_path(f.name)} for f in self.files]
             return bpy.ops.bim.link_ifc(directory=self.directory, files=serialized_files)
         else:
             if len(self.files) == 1:
-                return bpy.ops.bim.load_project(filepath=(filepath / self.files[0].name).as_posix())
+                return bpy.ops.bim.load_project(filepath=(filepath / clean_up_path(self.files[0].name)).as_posix())
             else:
                 self.report(
                     {"INFO"},
@@ -3126,4 +3185,44 @@ class ImageScalingTool(bpy.types.Operator, PolylineOperator):
         PolylineDecorator.uninstall()
         tool.Blender.update_viewport()
 
+        return {"FINISHED"}
+
+
+class LoadBlendMetadataAndIFC(bpy.types.Operator):
+    bl_idname = "bim.load_blend_metadata_and_ifc"
+    bl_label = "Load Blend Metadata and IFC"
+    bl_options = {"REGISTER", "UNDO"}
+    filepath: bpy.props.StringProperty(name="IFC File Path", default="")
+
+    def execute(self, context):
+        ifc_file = self.filepath
+        if not ifc_file:
+            props = tool.Blender.get_bim_props()
+            ifc_file = getattr(props, "ifc_file", None)
+
+        if not ifc_file:
+            self.report({"WARNING"}, "No IFC file path set.")
+            return {"CANCELLED"}
+
+        suffix = tool.Blender.get_addon_preferences().metadata_blend_file_suffix
+        if ifc_file.lower().endswith(".ifc"):
+            metadata_path = ifc_file[:-4] + suffix
+        else:
+            metadata_path = ifc_file + suffix
+
+        # Define a handler to load the IFC project after the blend file is loaded and context is restored
+        @persistent
+        def load_handler(*args):
+            bpy.app.handlers.load_post.remove(load_handler)
+            # After loading metadata, clear blend warning (no geometry loaded yet)
+            props = tool.Blender.get_bim_props()
+            props.has_blend_warning = False
+            # Load the IFC file into the current session (preserve layout)
+            bpy.ops.bim.load_project(filepath=ifc_file, should_start_fresh_session=False)
+            # Disable editing styles
+            bpy.ops.bim.disable_editing_styles()
+            self.report({"INFO"}, f"Loaded metadata and IFC: {metadata_path}, {ifc_file}")
+
+        bpy.app.handlers.load_post.append(load_handler)
+        bpy.ops.wm.open_mainfile(filepath=metadata_path)
         return {"FINISHED"}

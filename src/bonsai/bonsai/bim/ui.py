@@ -17,62 +17,51 @@
 # along with Bonsai.  If not, see <http://www.gnu.org/licenses/>.
 
 import os
-import bpy
 import platform
-import platformdirs
-import bonsai.bim.helper
+import textwrap
 from pathlib import Path
+from typing import TYPE_CHECKING, Literal, Optional
+
+import bpy
+import platformdirs
+from bpy.props import BoolProperty, IntProperty, StringProperty
 from bpy.types import Panel
-from bpy.props import StringProperty, IntProperty, BoolProperty
 from ifcopenshell.util.doc import (
+    get_attribute_doc,
     get_entity_doc,
     get_property_set_doc,
     get_type_doc,
-    get_attribute_doc,
 )
-from . import ifc
-from bonsai import get_debug_info
-import bonsai.bim
-import bonsai.tool as tool
 from ifcopenshell.util.file import IfcHeaderExtractor
-from bonsai.bim.prop import Attribute
-from bonsai.bim.helper import (
-    get_tab_names,
-    get_panel_tab_name,
-    should_show_panel,
-    get_tab_visibility,
-    set_tab_visibility,
-    get_panel_visibility,
-    is_panel_bookmarked,
-    get_panel_config,
-    get_all_tab_panels,
-    initialize_tab_visibilities,
-    initialize_panel_properties,
-)
+from natsort import natsorted
+
+import bonsai.bim
+import bonsai.bim.helper
+import bonsai.tool as tool
+from bonsai import get_debug_info
 from bonsai.bim.module.bsdd.prop import BIMBSDDProperties, BSDDProperty
-from bonsai.bim.module.pset.prop import IfcProperty
 from bonsai.bim.module.model.prop import (
     BIMDoorProperties,
-    BIMWindowProperties,
     BIMRailingProperties,
     BIMRoofProperties,
     BIMStairProperties,
+    BIMWindowProperties,
 )
 from bonsai.bim.module.model.ui import (
     draw_door_properties,
-    draw_window_properties,
     draw_railing_properties,
     draw_roof_properties,
     draw_stair_properties,
+    draw_window_properties,
 )
-from typing import Optional, TYPE_CHECKING, Literal
-from natsort import natsorted
-import textwrap
+from bonsai.bim.module.pset.prop import IfcProperty
+from bonsai.bim.prop import Attribute
 
+from . import ifc
 
 if TYPE_CHECKING:
-    from bonsai.bim.prop import ObjProperty
     from bonsai.bim.module.project.prop import BIMProjectProperties
+    from bonsai.bim.prop import ObjProperty
 
 
 class IFCFileSelector:
@@ -253,6 +242,39 @@ class BIM_UL_generic(bpy.types.UIList):
             layout.prop(item, "name", text="", emboss=False)
         else:
             layout.label(text="", translate=False)
+
+
+class BIM_UL_tab_visibilities(bpy.types.UIList):
+    def draw_item(
+        self,
+        context,
+        layout: bpy.types.UILayout,
+        data: bpy.types.PropertyGroup,
+        item: bpy.types.PropertyGroup,
+        icon,
+        active_data,
+        active_propname,
+    ) -> None:
+        row = layout.row()
+        row.prop(item, "name", text="", emboss=False)
+        row.prop(item, "is_visible", text="", icon="HIDE_OFF" if item.is_visible else "HIDE_ON", emboss=False)
+
+
+class BIM_UL_panel_visibilities(bpy.types.UIList):
+    def draw_item(
+        self,
+        context,
+        layout: bpy.types.UILayout,
+        data: bpy.types.PropertyGroup,
+        item: bpy.types.PropertyGroup,
+        icon,
+        active_data,
+        active_propname,
+    ) -> None:
+        row = layout.row()
+        row.prop(item, "label", text="", emboss=False)
+        row.prop(item, "is_visible", text="", icon="HIDE_OFF" if item.is_visible else "HIDE_ON", emboss=False)
+        row.prop(item, "is_bookmarked", text="", icon="SOLO_ON" if item.is_bookmarked else "SOLO_OFF", emboss=False)
 
 
 class GizmoPreferencesDoor(bpy.types.PropertyGroup):
@@ -697,37 +719,28 @@ class BIM_ADDON_preferences(bpy.types.AddonPreferences):
         default=False,
     )
 
-    mass_time_units_in_wizard: BoolProperty(
-        name="Mass and time units in project wizard",
-        description="Show mass and time units section in the new project wizard panel",
-        default=False,
-    )
-
     chain_filter_with_set_operations: BoolProperty(
-        name="NEW filter mode: Enable chained filters with set operations",
-        description="Enable chaining search filters with set operations: ADD (union: combine sets), SUBTRACT (difference: remove from set), FILTER (intersection: only elements in both sets), with autocomplete suggestions for filter values",
-        default=False,
-    )
-    default_filter_with_set_operations_for_globalid_and_class: BoolProperty(
-        name="DEFAULT filter mode: Enable set operations for GlobalId/Class",
-        description="Enable ADD/SUBTRACT/FILTER toggle buttons on entity (Class) and instance (GlobalId) filters for the DEFAULT filter mode",
+        name="NEW Filter mode: Enable chained filters with set operations",
+        description=(
+            "Enable chaining search filters with set operations: "
+            "ADD (union: combine sets), SUBTRACT (difference: remove from set), "
+            "FILTER (intersection: only elements in both sets), with autocomplete suggestions for filter values"
+        ),
         default=False,
     )
 
     save_metadata_blend_file: BoolProperty(
         name="Save non ifc data to metadata blend File",
-        description="Save session data (window layout, settings) to a metadata blend file alongside the IFC file. This file is automatically loaded when opening the project.",
+        description=(
+            "Save session data (window layout, settings) to a metadata blend file alongside the IFC file. "
+            "This file is automatically loaded when opening the project."
+        ),
         default=False,
     )
     metadata_blend_file_suffix: StringProperty(
         name="Metadata File Suffix",
         description="Custom suffix for the metadata blend file. Will be appended to the filename (without .ifc).",
         default=".ifc.metadata.blend",
-    )
-    user_ui_customization: BoolProperty(
-        name="User UI Customization",
-        description="Enable user interface customization features (hide/show tabs and panels, bookmark panels) and save the session settings as part of the metadata blend file",
-        default=False,
     )
 
     if TYPE_CHECKING:
@@ -768,9 +781,7 @@ class BIM_ADDON_preferences(bpy.types.AddonPreferences):
         container_hide_show_isolate: bool
         mass_time_units_in_wizard: bool
         chain_filter_with_set_operations: bool
-        default_filter_with_set_operations_for_globalid_and_class: bool
         save_metadata_blend_file: bool
-        user_ui_customization: bool
 
     def draw(self, context: bpy.types.Context) -> None:
         layout = self.layout
@@ -837,7 +848,11 @@ class BIM_ADDON_preferences(bpy.types.AddonPreferences):
         gizmo_prop_names = {p.attr_name for p in GizmoDoorEdition.dimension_gizmo_props}
         # Add special gizmos not in dimension_gizmo_props
         gizmo_prop_names.update(("swing_arc", "flip_arc"))
-        for prop in door_gizmos.__annotations__:
+        try:
+            annotations = door_gizmos.__annotations__
+        except AttributeError:
+            annotations = type(door_gizmos).__annotations__
+        for prop in annotations:
             if prop in gizmo_prop_names:
                 layout.prop(door_gizmos, prop)
 
@@ -846,7 +861,11 @@ class BIM_ADDON_preferences(bpy.types.AddonPreferences):
 
         window_gizmos = self.gizmos.window
         gizmo_prop_names = {p.attr_name for p in GizmoWindowEdition.dimension_gizmo_props}
-        for prop in window_gizmos.__annotations__:
+        try:
+            annotations = window_gizmos.__annotations__
+        except AttributeError:
+            annotations = type(window_gizmos).__annotations__
+        for prop in annotations:
             if prop in gizmo_prop_names:
                 layout.prop(window_gizmos, prop)
 
@@ -857,7 +876,11 @@ class BIM_ADDON_preferences(bpy.types.AddonPreferences):
         gizmo_prop_names = {p.attr_name for p in GizmoStairEdition.dimension_gizmo_props}
         # Add special gizmos not in dimension_gizmo_props
         special_gizmo_names = {"lock", "plus", "minus", "cycle"}
-        for prop in stair_gizmos.__annotations__:
+        try:
+            annotations = stair_gizmos.__annotations__
+        except AttributeError:
+            annotations = type(stair_gizmos).__annotations__
+        for prop in annotations:
             if prop in gizmo_prop_names or prop in special_gizmo_names:
                 layout.prop(stair_gizmos, prop)
 
@@ -953,22 +976,34 @@ class BIM_ADDON_preferences(bpy.types.AddonPreferences):
     def draw_extras_settings(self, layout: bpy.types.UILayout, context: bpy.types.Context) -> None:
         layout.prop(self, "container_hide_show_isolate")
         layout.prop(self, "mass_time_units_in_wizard")
-        layout.label(text="Filtering modes:")
-        box = layout.box()
-        row = box.row(align=True)
+        row = layout.row(align=True)
         row.prop(self, "chain_filter_with_set_operations")
         row.operator("bim.open_uri", text="", icon="HELP").uri = "https://community.osarch.org/discussion/3270"
-        row = box.row(align=True)
-        row.prop(self, "default_filter_with_set_operations_for_globalid_and_class")
-        row.operator("bim.open_uri", text="", icon="HELP").uri = "https://community.osarch.org/discussion/comment/27030"
         layout.prop(self, "save_metadata_blend_file")
         if self.save_metadata_blend_file:
             row = layout.row()
             row.separator()
             row.prop(self, "metadata_blend_file_suffix")
-            row = layout.row()
-            row.separator()
-            row.prop(self, "user_ui_customization")
+
+            bprops = tool.Blender.get_bim_props()
+            if tab_visibilities := bprops.tab_visibilities:
+                row = layout.row()
+                row.operator("bim.reset_ui_layout", icon="LOOP_BACK")
+                row = layout.row(align=True)
+                row.template_list(
+                    "BIM_UL_tab_visibilities", "", bprops, "tab_visibilities", bprops, "active_tab_visibility_index"
+                )
+                row.template_list(
+                    "BIM_UL_panel_visibilities",
+                    "",
+                    bprops,
+                    "panel_visibilities",
+                    bprops,
+                    "active_panel_visibility_index",
+                )
+            else:
+                row = layout.row()
+                row.operator("bim.manage_tab_visibility", icon="PREFERENCES")
 
 
 # Scene panel groups
@@ -984,77 +1019,30 @@ class BIM_PT_tabs(Panel):
     def draw(self, context):
         if not UIData.is_loaded:
             UIData.load()
-        is_ifc_project = bool(tool.Ifc.get())
         aprops = tool.Blender.get_area_props(context)
         addon_prefs = tool.Blender.get_addon_preferences()
-        ifc_icon = f"{UIData.data['tabs_icon_color_mode']}_ifc"
 
-        split = self.layout.split(factor=0.9)
-        col_left = split.column(align=True)
-        row_left = col_left.row(align=True)
-        row_left.alignment = "CENTER"
-        if get_tab_visibility("PROJECT"):
-            row_left.operator(
-                "bim.set_tab",
-                text="",
-                emboss=aprops.tab == "PROJECT",
-                icon_value=bonsai.bim.icons[ifc_icon].icon_id,
-            ).tab = "PROJECT"
-        if get_tab_visibility("OBJECT"):
-            self.draw_tab_entry(row_left, "FILE_3D", "OBJECT", is_ifc_project, aprops.tab == "OBJECT")
-        if get_tab_visibility("GEOMETRY"):
-            self.draw_tab_entry(row_left, "MATERIAL", "GEOMETRY", is_ifc_project, aprops.tab == "GEOMETRY")
-        if get_tab_visibility("DRAWINGS"):
-            self.draw_tab_entry(row_left, "DOCUMENTS", "DRAWINGS", is_ifc_project, aprops.tab == "DRAWINGS")
-        if get_tab_visibility("SERVICES"):
-            self.draw_tab_entry(row_left, "NETWORK_DRIVE", "SERVICES", is_ifc_project, aprops.tab == "SERVICES")
-        if get_tab_visibility("STRUCTURE"):
-            self.draw_tab_entry(row_left, "EDITMODE_HLT", "STRUCTURE", is_ifc_project, aprops.tab == "STRUCTURE")
-        if get_tab_visibility("SCHEDULING"):
-            self.draw_tab_entry(row_left, "NLA", "SCHEDULING", is_ifc_project, aprops.tab == "SCHEDULING")
-        if get_tab_visibility("FM"):
-            self.draw_tab_entry(row_left, "PACKAGE", "FM", True, aprops.tab == "FM")
-        if get_tab_visibility("QUALITY"):
-            self.draw_tab_entry(row_left, "COMMUNITY", "QUALITY", True, aprops.tab == "QUALITY")
-        if (
-            addon_prefs.save_metadata_blend_file
-            and addon_prefs.user_ui_customization
-            and get_tab_visibility("BOOKMARK")
-        ):
-            self.draw_tab_entry(row_left, "SOLO_ON", "BOOKMARK", True, aprops.tab == "BOOKMARK")
-        row_left.operator("bim.switch_tab", text="", emboss=False, icon="UV_SYNC_SELECT")
+        row = self.layout.row()
+        row.alignment = "CENTER"
+        for tab in UIData.data["tabs"]:
+            self.draw_tab_entry(row, tab[1], tab[0], tab[2], aprops.tab == tab[0])
+        row.operator("bim.switch_tab", text="", emboss=False, icon="UV_SYNC_SELECT")
 
-        row_left = col_left.row(align=True)
+        row = self.layout.row()
         # Yes, that's right.
-        row_left.alignment = "CENTER"
-        row_left.scale_y = 0.2
+        row.alignment = "CENTER"
+        row.scale_y = 0.2
 
-        if not (addon_prefs.save_metadata_blend_file and addon_prefs.user_ui_customization):
-            row_left.prop(aprops, "inactive_tab", text="", icon="BLANK1", emboss=False)
-
-        for tab in get_tab_names():
+        for tab in UIData.data["tabs"]:
             # Draw a little underscore below the active tab icon.
-            if get_tab_visibility(tab):
-                if aprops.tab == tab:
-                    row_left.prop(aprops, "active_tab", text="", icon="BLANK1")
-                else:
-                    row_left.prop(aprops, "inactive_tab", text="", icon="BLANK1", emboss=False)
-        row_left.prop(aprops, "inactive_tab", text="", icon="BLANK1", emboss=False)  # space for Switch
-        col_right = split.column(align=True)
-        row_right = col_right.row(align=True)
-        row_right.alignment = "RIGHT"
+            if aprops.tab == tab[0]:
+                row.prop(aprops, "active_tab", text="", icon="BLANK1")
+            else:
+                row.prop(aprops, "inactive_tab", text="", icon="BLANK1", emboss=False)
+        row.prop(aprops, "inactive_tab", text="", icon="BLANK1", emboss=False)  # space for Switch
 
-        if addon_prefs.save_metadata_blend_file and addon_prefs.user_ui_customization:
-            row_right.operator("bim.manage_tab_visibility", icon="PREFERENCES", text="")
-
-        row = self.layout.row(align=True)
+        row = self.layout.row()
         row.prop(aprops, "tab", text="")
-
-        if addon_prefs.save_metadata_blend_file and addon_prefs.user_ui_customization:
-            for tab in get_tab_names():
-                if get_tab_visibility(tab):
-                    if aprops.tab == tab:
-                        row.operator("bim.manage_tab_panels", text="", icon="PREFERENCES").tab_name = tab
 
         if bonsai.REINSTALLED_BBIM_VERSION:
             box = self.layout.box()
@@ -1121,7 +1109,10 @@ class BIM_PT_tabs(Panel):
 
     def draw_tab_entry(self, row, icon, tab_name, enabled=True, highlight=True):
         tab_entry = row.row(align=True)
-        tab_entry.operator("bim.set_tab", text="", emboss=highlight, icon=icon).tab = tab_name
+        if isinstance(icon, int):
+            tab_entry.operator("bim.set_tab", text="", emboss=highlight, icon_value=icon).tab = tab_name
+        else:
+            tab_entry.operator("bim.set_tab", text="", emboss=highlight, icon=icon).tab = tab_name
         tab_entry.enabled = enabled
 
 
@@ -1135,9 +1126,7 @@ class BIM_PT_tab_new_project_wizard(Panel):
 
     @classmethod
     def poll(cls, context):
-        if not should_show_panel(cls.bl_idname, cls.bim_tab_name, context):
-            return False
-        if not tool.Blender.is_tab(context, cls.bim_tab_name):
+        if not tool.Blender.should_show_panel(context, cls.bim_tab_name, cls.bl_idname):
             return False
         bim_props = tool.Blender.get_bim_props()
         pprops = tool.Project.get_project_props()
@@ -1161,20 +1150,16 @@ class BIM_PT_tab_project_info(Panel):
 
     @classmethod
     def poll(cls, context):
-        if not should_show_panel(cls.bl_idname, cls.bim_tab_name, context):
-            return False
-        if tool.Blender.is_tab(context, cls.bim_tab_name):
+        if tool.Blender.should_show_panel(context, cls.bim_tab_name, cls.bl_idname):
             bim_props = tool.Blender.get_bim_props()
             pprops = tool.Project.get_project_props()
             if pprops.is_loading:
                 return True
             elif tool.Ifc.get() or bim_props.ifc_file:
                 return True
-        return tool.Blender.is_tab(context, "BOOKMARK")
 
     def draw(self, context):
-        layout = self.layout
-        layout.label(text="This is the Project Info panel.")
+        pass
 
 
 class BIM_PT_tab_spatial(Panel):
@@ -1187,11 +1172,8 @@ class BIM_PT_tab_spatial(Panel):
 
     @classmethod
     def poll(cls, context):
-        if not should_show_panel(cls.bl_idname, cls.bim_tab_name, context):
-            return False
-        if tool.Blender.is_tab(context, cls.bim_tab_name) and tool.Ifc.get():
+        if tool.Blender.should_show_panel(context, cls.bim_tab_name, cls.bl_idname) and tool.Ifc.get():
             return True
-        return tool.Blender.is_tab(context, "BOOKMARK")
 
     def draw(self, context):
         pass
@@ -1207,11 +1189,8 @@ class BIM_PT_tab_project_setup(Panel):
 
     @classmethod
     def poll(cls, context):
-        if not should_show_panel(cls.bl_idname, cls.bim_tab_name, context):
-            return False
-        if tool.Blender.is_tab(context, cls.bim_tab_name):
+        if tool.Blender.should_show_panel(context, cls.bim_tab_name, cls.bl_idname):
             return True
-        return tool.Blender.is_tab(context, "BOOKMARK")
 
     def draw(self, context):
         pass
@@ -1228,11 +1207,8 @@ class BIM_PT_tab_stakeholders(Panel):
 
     @classmethod
     def poll(cls, context):
-        if not should_show_panel(cls.bl_idname, cls.bim_tab_name, context):
-            return False
-        if tool.Blender.is_tab(context, cls.bim_tab_name) and tool.Ifc.get():
+        if tool.Blender.should_show_panel(context, cls.bim_tab_name, cls.bl_idname) and tool.Ifc.get():
             return True
-        return tool.Blender.is_tab(context, "BOOKMARK")
 
     def draw(self, context):
         pass
@@ -1248,11 +1224,8 @@ class BIM_PT_tab_collaboration(Panel):
 
     @classmethod
     def poll(cls, context):
-        if not should_show_panel(cls.bl_idname, cls.bim_tab_name, context):
-            return False
-        if tool.Blender.is_tab(context, cls.bim_tab_name):
+        if tool.Blender.should_show_panel(context, cls.bim_tab_name, cls.bl_idname):
             return True
-        return tool.Blender.is_tab(context, "BOOKMARK")
 
     def draw(self, context):
         pass
@@ -1269,11 +1242,8 @@ class BIM_PT_tab_grouping_and_filtering(Panel):
 
     @classmethod
     def poll(cls, context):
-        if not should_show_panel(cls.bl_idname, cls.bim_tab_name, context):
-            return False
-        if tool.Blender.is_tab(context, cls.bim_tab_name) and tool.Ifc.get():
+        if tool.Blender.should_show_panel(context, cls.bim_tab_name, cls.bl_idname) and tool.Ifc.get():
             return True
-        return tool.Blender.is_tab(context, "BOOKMARK")
 
     def draw(self, context):
         pass
@@ -1297,11 +1267,8 @@ class BIM_PT_tab_geometry(Panel):
 
     @classmethod
     def poll(cls, context):
-        if not should_show_panel(cls.bl_idname, cls.bim_tab_name, context):
-            return False
-        if tool.Blender.is_tab(context, cls.bim_tab_name) and tool.Ifc.get():
+        if tool.Blender.should_show_panel(context, cls.bim_tab_name, cls.bl_idname) and tool.Ifc.get():
             return True
-        return tool.Blender.is_tab(context, "BOOKMARK")
 
     def draw(self, context):
         pass
@@ -1317,11 +1284,8 @@ class BIM_PT_tab_status(Panel):
 
     @classmethod
     def poll(cls, context):
-        if not should_show_panel(cls.bl_idname, cls.bim_tab_name, context):
-            return False
-        if tool.Blender.is_tab(context, cls.bim_tab_name) and tool.Ifc.get():
+        if tool.Blender.should_show_panel(context, cls.bim_tab_name, cls.bl_idname) and tool.Ifc.get():
             return True
-        return tool.Blender.is_tab(context, "BOOKMARK")
 
     def draw(self, context):
         pass
@@ -1337,11 +1301,8 @@ class BIM_PT_tab_qto(Panel):
 
     @classmethod
     def poll(cls, context):
-        if not should_show_panel(cls.bl_idname, cls.bim_tab_name, context):
-            return False
-        if tool.Blender.is_tab(context, cls.bim_tab_name) and tool.Ifc.get():
+        if tool.Blender.should_show_panel(context, cls.bim_tab_name, cls.bl_idname) and tool.Ifc.get():
             return True
-        return tool.Blender.is_tab(context, "BOOKMARK")
 
     def draw(self, context):
         pass
@@ -1357,11 +1318,8 @@ class BIM_PT_tab_resources(Panel):
 
     @classmethod
     def poll(cls, context):
-        if not should_show_panel(cls.bl_idname, cls.bim_tab_name, context):
-            return False
-        if tool.Blender.is_tab(context, cls.bim_tab_name) and tool.Ifc.get():
+        if tool.Blender.should_show_panel(context, cls.bim_tab_name, cls.bl_idname) and tool.Ifc.get():
             return True
-        return tool.Blender.is_tab(context, "BOOKMARK")
 
     def draw(self, context):
         pass
@@ -1377,11 +1335,8 @@ class BIM_PT_tab_cost(Panel):
 
     @classmethod
     def poll(cls, context):
-        if not should_show_panel(cls.bl_idname, cls.bim_tab_name, context):
-            return False
-        if tool.Blender.is_tab(context, cls.bim_tab_name) and tool.Ifc.get():
+        if tool.Blender.should_show_panel(context, cls.bim_tab_name, cls.bl_idname) and tool.Ifc.get():
             return True
-        return tool.Blender.is_tab(context, "BOOKMARK")
 
     def draw(self, context):
         pass
@@ -1397,11 +1352,8 @@ class BIM_PT_tab_sequence(Panel):
 
     @classmethod
     def poll(cls, context):
-        if not should_show_panel(cls.bl_idname, cls.bim_tab_name, context):
-            return False
-        if tool.Blender.is_tab(context, cls.bim_tab_name) and tool.Ifc.get():
+        if tool.Blender.should_show_panel(context, cls.bim_tab_name, cls.bl_idname) and tool.Ifc.get():
             return True
-        return tool.Blender.is_tab(context, "BOOKMARK")
 
     def draw(self, context):
         pass
@@ -1417,11 +1369,8 @@ class BIM_PT_tab_structural(Panel):
 
     @classmethod
     def poll(cls, context):
-        if not should_show_panel(cls.bl_idname, cls.bim_tab_name, context):
-            return False
-        if tool.Blender.is_tab(context, cls.bim_tab_name) and tool.Ifc.get():
+        if tool.Blender.should_show_panel(context, cls.bim_tab_name, cls.bl_idname) and tool.Ifc.get():
             return True
-        return tool.Blender.is_tab(context, "BOOKMARK")
 
     def draw(self, context):
         pass
@@ -1437,11 +1386,8 @@ class BIM_PT_tab_services(Panel):
 
     @classmethod
     def poll(cls, context):
-        if not should_show_panel(cls.bl_idname, cls.bim_tab_name, context):
-            return False
-        if tool.Blender.is_tab(context, cls.bim_tab_name) and tool.Ifc.get():
+        if tool.Blender.should_show_panel(context, cls.bim_tab_name, cls.bl_idname) and tool.Ifc.get():
             return True
-        return tool.Blender.is_tab(context, "BOOKMARK")
 
     def draw(self, context):
         pass
@@ -1457,11 +1403,8 @@ class BIM_PT_tab_lighting(Panel):
 
     @classmethod
     def poll(cls, context):
-        if not should_show_panel(cls.bl_idname, cls.bim_tab_name, context):
-            return False
-        if tool.Blender.is_tab(context, cls.bim_tab_name) and tool.Ifc.get():
+        if tool.Blender.should_show_panel(context, cls.bim_tab_name, cls.bl_idname) and tool.Ifc.get():
             return True
-        return tool.Blender.is_tab(context, "BOOKMARK")
 
     def draw(self, context):
         pass
@@ -1477,11 +1420,8 @@ class BIM_PT_tab_zones(Panel):
 
     @classmethod
     def poll(cls, context):
-        if not should_show_panel(cls.bl_idname, cls.bim_tab_name, context):
-            return False
-        if tool.Blender.is_tab(context, cls.bim_tab_name) and tool.Ifc.get():
+        if tool.Blender.should_show_panel(context, cls.bim_tab_name, cls.bl_idname) and tool.Ifc.get():
             return True
-        return tool.Blender.is_tab(context, "BOOKMARK")
 
     def draw(self, context):
         pass
@@ -1497,11 +1437,8 @@ class BIM_PT_tab_solar_analysis(Panel):
 
     @classmethod
     def poll(cls, context):
-        if not should_show_panel(cls.bl_idname, cls.bim_tab_name, context):
-            return False
-        if tool.Blender.is_tab(context, cls.bim_tab_name) and tool.Ifc.get():
+        if tool.Blender.should_show_panel(context, cls.bim_tab_name, cls.bl_idname) and tool.Ifc.get():
             return True
-        return tool.Blender.is_tab(context, "BOOKMARK")
 
     def draw(self, context):
         pass
@@ -1517,11 +1454,8 @@ class BIM_PT_tab_quality_control(Panel):
 
     @classmethod
     def poll(cls, context):
-        if not should_show_panel(cls.bl_idname, cls.bim_tab_name, context):
-            return False
-        if tool.Blender.is_tab(context, cls.bim_tab_name):
+        if tool.Blender.should_show_panel(context, cls.bim_tab_name, cls.bl_idname):
             return True
-        return tool.Blender.is_tab(context, "BOOKMARK")
 
     def draw(self, context):
         pass
@@ -1537,11 +1471,8 @@ class BIM_PT_tab_clash_detection(Panel):
 
     @classmethod
     def poll(cls, context):
-        if not should_show_panel(cls.bl_idname, cls.bim_tab_name, context):
-            return False
-        if tool.Blender.is_tab(context, cls.bim_tab_name):
+        if tool.Blender.should_show_panel(context, cls.bim_tab_name, cls.bl_idname):
             return True
-        return tool.Blender.is_tab(context, "BOOKMARK")
 
     def draw(self, context):
         pass
@@ -1558,11 +1489,8 @@ class BIM_PT_tab_sandbox(Panel):
 
     @classmethod
     def poll(cls, context):
-        if not should_show_panel(cls.bl_idname, cls.bim_tab_name, context):
-            return False
-        if tool.Blender.is_tab(context, cls.bim_tab_name):
+        if tool.Blender.should_show_panel(context, cls.bim_tab_name, cls.bl_idname):
             return True
-        return tool.Blender.is_tab(context, "BOOKMARK")
 
     def draw(self, context):
         row = self.layout.row()
@@ -1581,11 +1509,9 @@ class BIM_PT_tab_object_metadata(Panel):
 
     @classmethod
     def poll(cls, context):
-        if not should_show_panel(cls.bl_idname, cls.bim_tab_name, context):
-            return False
         props = tool.Project.get_project_props()
         if (
-            tool.Blender.is_tab(context, cls.bim_tab_name)
+            tool.Blender.should_show_panel(context, cls.bim_tab_name, cls.bl_idname)
             and tool.Ifc.get()
             and (obj := context.active_object)
             # Hide links empty handles.
@@ -1596,7 +1522,6 @@ class BIM_PT_tab_object_metadata(Panel):
             )
         ):
             return True
-        return tool.Blender.is_tab(context, "BOOKMARK")
 
     def draw(self, context):
         pass
@@ -1613,16 +1538,13 @@ class BIM_PT_tab_placement(Panel):
 
     @classmethod
     def poll(cls, context):
-        if not should_show_panel(cls.bl_idname, cls.bim_tab_name, context):
-            return False
         if (
-            tool.Blender.is_tab(context, cls.bim_tab_name)
+            tool.Blender.should_show_panel(context, cls.bim_tab_name, cls.bl_idname)
             and tool.Ifc.get()
             and (obj := context.active_object)
             and tool.Ifc.get_entity(obj)
         ):
             return True
-        return tool.Blender.is_tab(context, "BOOKMARK")
 
     def draw(self, context):
         pass
@@ -1639,11 +1561,8 @@ class BIM_PT_tab_representations(Panel):
 
     @classmethod
     def poll(cls, context):
-        if not should_show_panel(cls.bl_idname, cls.bim_tab_name, context):
-            return False
-        if tool.Blender.is_tab(context, cls.bim_tab_name) and tool.Ifc.get():
+        if tool.Blender.should_show_panel(context, cls.bim_tab_name, cls.bl_idname) and tool.Ifc.get():
             return True
-        return tool.Blender.is_tab(context, "BOOKMARK")
 
     def draw(self, context):
         pass
@@ -1661,11 +1580,8 @@ class BIM_PT_tab_geometric_relationships(Panel):
 
     @classmethod
     def poll(cls, context):
-        if not should_show_panel(cls.bl_idname, cls.bim_tab_name, context):
-            return False
-        if tool.Blender.is_tab(context, cls.bim_tab_name) and tool.Ifc.get():
+        if tool.Blender.should_show_panel(context, cls.bim_tab_name, cls.bl_idname) and tool.Ifc.get():
             return True
-        return tool.Blender.is_tab(context, "BOOKMARK")
 
     def draw(self, context):
         pass
@@ -1683,11 +1599,8 @@ class BIM_PT_tab_parametric_geometry(Panel):
 
     @classmethod
     def poll(cls, context):
-        if not should_show_panel(cls.bl_idname, cls.bim_tab_name, context):
-            return False
-        if tool.Blender.is_tab(context, cls.bim_tab_name) and tool.Ifc.get():
+        if tool.Blender.should_show_panel(context, cls.bim_tab_name, cls.bl_idname) and tool.Ifc.get():
             return True
-        return tool.Blender.is_tab(context, "BOOKMARK")
 
     def draw(self, context):
         pass
@@ -1704,11 +1617,8 @@ class BIM_PT_tab_object_materials(Panel):
 
     @classmethod
     def poll(cls, context):
-        if not should_show_panel(cls.bl_idname, cls.bim_tab_name, context):
-            return False
-        if tool.Blender.is_tab(context, cls.bim_tab_name) and tool.Ifc.get():
+        if tool.Blender.should_show_panel(context, cls.bim_tab_name, cls.bl_idname) and tool.Ifc.get():
             return True
-        return tool.Blender.is_tab(context, "BOOKMARK")
 
     def draw(self, context):
         pass
@@ -1725,11 +1635,8 @@ class BIM_PT_tab_materials(Panel):
 
     @classmethod
     def poll(cls, context):
-        if not should_show_panel(cls.bl_idname, cls.bim_tab_name, context):
-            return False
-        if tool.Blender.is_tab(context, cls.bim_tab_name) and tool.Ifc.get():
+        if tool.Blender.should_show_panel(context, cls.bim_tab_name, cls.bl_idname) and tool.Ifc.get():
             return True
-        return tool.Blender.is_tab(context, "BOOKMARK")
 
     def draw(self, context):
         pass
@@ -1746,11 +1653,8 @@ class BIM_PT_tab_styles(Panel):
 
     @classmethod
     def poll(cls, context):
-        if not should_show_panel(cls.bl_idname, cls.bim_tab_name, context):
-            return False
-        if tool.Blender.is_tab(context, cls.bim_tab_name) and tool.Ifc.get():
+        if tool.Blender.should_show_panel(context, cls.bim_tab_name, cls.bl_idname) and tool.Ifc.get():
             return True
-        return tool.Blender.is_tab(context, "BOOKMARK")
 
     def draw(self, context):
         pass
@@ -1767,11 +1671,8 @@ class BIM_PT_tab_profiles(Panel):
 
     @classmethod
     def poll(cls, context):
-        if not should_show_panel(cls.bl_idname, cls.bim_tab_name, context):
-            return False
-        if tool.Blender.is_tab(context, cls.bim_tab_name) and tool.Ifc.get():
+        if tool.Blender.should_show_panel(context, cls.bim_tab_name, cls.bl_idname) and tool.Ifc.get():
             return True
-        return tool.Blender.is_tab(context, "BOOKMARK")
 
     def draw(self, context):
         pass
@@ -1788,11 +1689,8 @@ class BIM_PT_tab_sheets(Panel):
 
     @classmethod
     def poll(cls, context):
-        if not should_show_panel(cls.bl_idname, cls.bim_tab_name, context):
-            return False
-        if tool.Blender.is_tab(context, cls.bim_tab_name) and tool.Ifc.get():
+        if tool.Blender.should_show_panel(context, cls.bim_tab_name, cls.bl_idname) and tool.Ifc.get():
             return True
-        return tool.Blender.is_tab(context, "BOOKMARK")
 
     def draw(self, context):
         pass
@@ -1809,11 +1707,8 @@ class BIM_PT_tab_drawings(Panel):
 
     @classmethod
     def poll(cls, context):
-        if not should_show_panel(cls.bl_idname, cls.bim_tab_name, context):
-            return False
-        if tool.Blender.is_tab(context, cls.bim_tab_name) and tool.Ifc.get():
+        if tool.Blender.should_show_panel(context, cls.bim_tab_name, cls.bl_idname) and tool.Ifc.get():
             return True
-        return tool.Blender.is_tab(context, "BOOKMARK")
 
     def draw(self, context):
         pass
@@ -1830,11 +1725,8 @@ class BIM_PT_tab_schedules(Panel):
 
     @classmethod
     def poll(cls, context):
-        if not should_show_panel(cls.bl_idname, cls.bim_tab_name, context):
-            return False
-        if tool.Blender.is_tab(context, cls.bim_tab_name) and tool.Ifc.get():
+        if tool.Blender.should_show_panel(context, cls.bim_tab_name, cls.bl_idname) and tool.Ifc.get():
             return True
-        return tool.Blender.is_tab(context, "BOOKMARK")
 
     def draw(self, context):
         pass
@@ -1851,11 +1743,8 @@ class BIM_PT_tab_references(Panel):
 
     @classmethod
     def poll(cls, context):
-        if not should_show_panel(cls.bl_idname, cls.bim_tab_name, context):
-            return False
-        if tool.Blender.is_tab(context, cls.bim_tab_name) and tool.Ifc.get():
+        if tool.Blender.should_show_panel(context, cls.bim_tab_name, cls.bl_idname) and tool.Ifc.get():
             return True
-        return tool.Blender.is_tab(context, "BOOKMARK")
 
     def draw(self, context):
         pass
@@ -1873,11 +1762,8 @@ class BIM_PT_tab_misc(Panel):
 
     @classmethod
     def poll(cls, context):
-        if not should_show_panel(cls.bl_idname, cls.bim_tab_name, context):
-            return False
-        if tool.Blender.is_tab(context, cls.bim_tab_name) and tool.Ifc.get():
+        if tool.Blender.should_show_panel(context, cls.bim_tab_name, cls.bl_idname) and tool.Ifc.get():
             return True
-        return tool.Blender.is_tab(context, "BOOKMARK")
 
     def draw(self, context):
         pass
@@ -1894,11 +1780,8 @@ class BIM_PT_tab_handover(Panel):
 
     @classmethod
     def poll(cls, context):
-        if not should_show_panel(cls.bl_idname, cls.bim_tab_name, context):
-            return False
-        if tool.Blender.is_tab(context, cls.bim_tab_name):
+        if tool.Blender.should_show_panel(context, cls.bim_tab_name, cls.bl_idname):
             return True
-        return tool.Blender.is_tab(context, "BOOKMARK")
 
     def draw(self, context):
         pass
@@ -1915,11 +1798,8 @@ class BIM_PT_tab_operations(Panel):
 
     @classmethod
     def poll(cls, context):
-        if not should_show_panel(cls.bl_idname, cls.bim_tab_name, context):
-            return False
-        if tool.Blender.is_tab(context, cls.bim_tab_name):
+        if tool.Blender.should_show_panel(context, cls.bim_tab_name, cls.bl_idname):
             return True
-        return tool.Blender.is_tab(context, "BOOKMARK")
 
     def draw(self, context):
         pass
@@ -1960,8 +1840,8 @@ class UIData:
     def load(cls):
         cls.data = {
             "version": cls.version(),
-            "tabs_icon_color_mode": cls.icon_color_mode("user_interface.wcol_regular.text"),
             "menu_icon_color_mode": cls.icon_color_mode("user_interface.wcol_menu.text"),
+            "tabs": cls.tabs(),
         }
         cls.is_loaded = True
 
@@ -1972,6 +1852,28 @@ class UIData:
     @classmethod
     def icon_color_mode(cls, color_path):
         return tool.Blender.detect_icon_color_mode(color_path)
+
+    @classmethod
+    def tabs(cls):
+        hidden_tabs = [t.name for t in tool.Blender.get_bim_props().tab_visibilities if not t.is_visible]
+        color_mode = cls.icon_color_mode("user_interface.wcol_regular.text")
+        is_ifc_project = bool(tool.Ifc.get())
+        return [
+            tab
+            for tab in [
+                ("PROJECT", bonsai.bim.icons[f"{color_mode}_ifc"].icon_id, True),
+                ("OBJECT", "FILE_3D", is_ifc_project),
+                ("GEOMETRY", "MATERIAL", is_ifc_project),
+                ("DRAWINGS", "DOCUMENTS", is_ifc_project),
+                ("SERVICES", "NETWORK_DRIVE", is_ifc_project),
+                ("STRUCTURE", "EDITMODE_HLT", is_ifc_project),
+                ("SCHEDULING", "NLA", is_ifc_project),
+                ("FM", "PACKAGE", True),
+                ("QUALITY", "COMMUNITY", True),
+                ("BOOKMARK", "SOLO_ON", is_ifc_project),
+            ]
+            if tab[0] not in hidden_tabs
+        ]
 
 
 def draw_statusbar(self, context):

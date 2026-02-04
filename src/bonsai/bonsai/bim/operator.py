@@ -16,48 +16,42 @@
 # You should have received a copy of the GNU General Public License
 # along with Bonsai.  If not, see <http://www.gnu.org/licenses/>.
 
-import os
 import contextlib
-import bpy
-import bmesh
-import time
 import logging
-import textwrap
-import shutil
+import os
 import platform
+import shutil
 import subprocess
 import tempfile
+import textwrap
+import time
 import webbrowser
-import ifcopenshell
-import bonsai.bim
-import bonsai.tool as tool
-import bonsai.bim.handler
+from collections import namedtuple
+from collections.abc import Iterable
 from enum import Enum
-from bonsai.bim.helper import (
-    get_all_tab_panels,
-    get_tab_visibility,
-    set_tab_visibility,
-    get_tab_names,
-    get_panel_config,
-    initialize_panel_properties,
-    initialize_tab_visibilities,
-)
-from bpy_extras.io_utils import ImportHelper
-from bonsai.bim import import_ifc
-from bonsai.bim.prop import StrProperty
-from bonsai.bim.ui import IFCFileSelector
-from bonsai.bim.helper import get_enum_items
-from mathutils import Vector, Euler
 from math import radians
 from pathlib import Path
-from collections import namedtuple
-from typing import Union, TYPE_CHECKING, Literal, get_args
-from collections.abc import Iterable
+from typing import TYPE_CHECKING, Literal, Union, get_args
+
+import bmesh
+import bpy
+import ifcopenshell
+from bpy_extras.io_utils import ImportHelper
+from mathutils import Euler, Vector
 from natsort import natsorted
 
+import bonsai.bim
+import bonsai.bim.handler
+import bonsai.tool as tool
+from bonsai.bim import import_ifc
+from bonsai.bim.helper import get_enum_items
+from bonsai.bim.prop import StrProperty
+from bonsai.bim.ui import IFCFileSelector
+
 if TYPE_CHECKING:
-    from bonsai.bim.prop import MultipleFileSelect, Attribute
     from bpy.stub_internal import rna_enums
+
+    from bonsai.bim.prop import Attribute, MultipleFileSelect
 
 
 class SetTab(bpy.types.Operator):
@@ -361,38 +355,6 @@ bpy.ops.wm.save_as_mainfile(filepath=r'{blendmetadata_path}')
         except Exception:
             pass
 
-        return {"FINISHED"}
-
-
-class LoadBlendMetadataAndIFC(bpy.types.Operator):
-    bl_idname = "bim.load_blend_metadata_and_ifc"
-    bl_label = "Load Blend Metadata and IFC"
-    bl_options = {"REGISTER", "UNDO"}
-    filepath: bpy.props.StringProperty(name="IFC File Path", default="")
-
-    def execute(self, context):
-        ifc_file = self.filepath
-        if not ifc_file:
-            props = tool.Blender.get_bim_props()
-            ifc_file = getattr(props, "ifc_file", None)
-
-        if not ifc_file:
-            self.report({"WARNING"}, "No IFC file path set.")
-            return {"CANCELLED"}
-
-        suffix = tool.Blender.get_addon_preferences().metadata_blend_file_suffix
-        if ifc_file.lower().endswith(".ifc"):
-            metadata_path = ifc_file[:-4] + suffix
-        else:
-            metadata_path = ifc_file + suffix
-        # Open the metadata blend file
-        bpy.ops.wm.open_mainfile(filepath=metadata_path)
-        # After loading metadata, clear blend warning (no geometry loaded yet)
-        props = tool.Blender.get_bim_props()
-        props.has_blend_warning = False
-        # Load the IFC file into the current session (preserve layout)
-        bpy.ops.bim.load_project(filepath=ifc_file, should_start_fresh_session=False)
-        self.report({"INFO"}, f"Loaded metadata and IFC: {metadata_path}, {ifc_file}")
         return {"FINISHED"}
 
 
@@ -1767,156 +1729,6 @@ class BIM_OT_attribute_remove_subitem(bpy.types.Operator):
         return {"FINISHED"}
 
 
-class BIM_UL_tab_panels(bpy.types.UIList):
-    """UIList for Tab Panels"""
-
-    def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
-        row = layout.row(align=True)
-        row.label(text=item["bl_label"])
-
-        row.operator(
-            "bim.toggle_panel_visibility",
-            text="",
-            icon="HIDE_OFF" if item.get("visible", True) else "HIDE_ON",
-        ).action = f"TOGGLE_VISIBILITY_{item.name}"
-
-        row.operator(
-            "bim.bookmark_panel",
-            text="",
-            icon="SOLO_ON" if item.get("bookmarked", False) else "SOLO_OFF",
-        ).action = f"BOOKMARK_{item.name}"
-
-
-class BIM_OT_toggle_panel_visibility(bpy.types.Operator):
-    """Toggle Panel Visibility"""
-
-    bl_idname = "bim.toggle_panel_visibility"
-    bl_label = "Toggle Panel Visibility"
-    bl_options = {"REGISTER", "UNDO"}
-
-    action: bpy.props.StringProperty()
-
-    def execute(self, context):
-        panel_name = self.action.replace("TOGGLE_VISIBILITY_", "")
-        active_tab = getattr(context.scene, "active_tab_name", None) or getattr(
-            tool.Blender.get_bim_props(), "tab", None
-        )
-        is_bookmark_tab = active_tab == "BOOKMARK"
-
-        panel_config = get_panel_config(panel_name, create_if_missing=True)
-        if panel_config:
-            if is_bookmark_tab:
-                panel_config.is_visible_in_bookmarks = not panel_config.is_visible_in_bookmarks
-                new_value = panel_config.is_visible_in_bookmarks
-            else:
-                panel_config.is_visible_in_tab = not panel_config.is_visible_in_tab
-                new_value = panel_config.is_visible_in_tab
-
-            for item in context.scene.tab_panels:
-                if item.name == panel_name:
-                    item["visible"] = new_value
-                    break
-
-        for area in bpy.context.window.screen.areas:
-            if area.type == "PROPERTIES":
-                area.tag_redraw()
-
-        tab_context = "Bookmarks" if is_bookmark_tab else "Tab"
-        self.report({"INFO"}, f"Toggled visibility for {panel_name} in {tab_context}.")
-        return {"FINISHED"}
-
-
-class BIM_OT_bookmark_panel(bpy.types.Operator):
-    """Bookmark Panel"""
-
-    bl_idname = "bim.bookmark_panel"
-    bl_label = "Bookmark Panel"
-    bl_options = {"REGISTER", "UNDO"}
-
-    action: bpy.props.StringProperty()
-
-    def execute(self, context):
-        panel_name = self.action.replace("BOOKMARK_", "")
-        panel_config = get_panel_config(panel_name, create_if_missing=True)
-
-        if panel_config:
-            panel_config.is_bookmarked = not panel_config.is_bookmarked
-
-            for item in context.scene.tab_panels:
-                if item.name == panel_name:
-                    item["bookmarked"] = panel_config.is_bookmarked
-                    break
-
-        for area in bpy.context.window.screen.areas:
-            if area.type == "PROPERTIES":
-                area.tag_redraw()
-
-        self.report({"INFO"}, f"Toggled bookmark for {panel_name}.")
-        return {"FINISHED"}
-
-
-class BIM_OT_manage_tab_panels(bpy.types.Operator):
-    """Manage Tab Panels"""
-
-    bl_idname = "bim.manage_tab_panels"
-    bl_label = "Manage Tab Panels"
-    bl_options = {"REGISTER", "UNDO"}
-
-    tab_name: bpy.props.StringProperty()
-
-    def invoke(self, context, event):
-
-        context.scene.active_tab_name = self.tab_name
-        context.scene.tab_panels.clear()
-
-        initialize_tab_visibilities()
-        initialize_panel_properties()
-        all_panels = get_all_tab_panels(force_refresh=True)
-
-        for panel_data in all_panels.get(self.tab_name, []):
-            panel_name = panel_data.get("bl_idname", "")
-            panel_label = panel_data.get("bl_label", "")
-            if not panel_name or not panel_label:
-                continue
-
-            item = context.scene.tab_panels.add()
-            item.name = panel_name
-            item["bl_label"] = panel_label
-
-            panel_config = get_panel_config(panel_name, create_if_missing=True)
-            if panel_config:
-                if self.tab_name == "BOOKMARK":
-                    item["visible"] = panel_config.is_visible_in_bookmarks
-                else:
-                    item["visible"] = panel_config.is_visible_in_tab
-                item["bookmarked"] = panel_config.is_bookmarked
-            else:
-                item["visible"] = True
-                item["bookmarked"] = False
-
-        return context.window_manager.invoke_popup(self)
-
-    def draw(self, context):
-        layout = self.layout
-        layout.label(text=f"Manage Panels for {self.tab_name} Tab")
-
-        row = layout.row()
-        row.template_list("BIM_UL_tab_panels", "", context.scene, "tab_panels", context.scene, "active_tab_panel_index")
-
-    def execute(self, context):
-        for item in context.scene.tab_panels:
-            panel_config = get_panel_config(item.name, create_if_missing=True)
-            if panel_config:
-                if self.tab_name == "BOOKMARK":
-                    panel_config.is_visible_in_bookmarks = item["visible"]
-                else:
-                    panel_config.is_visible_in_tab = item["visible"]
-                panel_config.is_bookmarked = item["bookmarked"]
-
-        self.report({"INFO"}, f"Panels for {self.tab_name} managed successfully.")
-        return {"FINISHED"}
-
-
 class BIM_OT_manage_tab_visibility(bpy.types.Operator):
     """Manage Tab Visibility"""
 
@@ -1924,51 +1736,26 @@ class BIM_OT_manage_tab_visibility(bpy.types.Operator):
     bl_label = "Manage Tab Visibility"
     bl_options = {"REGISTER", "UNDO"}
 
-    def draw(self, context):
-        layout = self.layout
-        row = layout.row()
-        row = self.layout.row(align=True)
-        row.alignment = "RIGHT"
-
-        row.operator("bim.reset_ui_layout", icon="FILE_REFRESH", text="")
-        row = layout.row()
-        row = self.layout.row(align=True)
-        row.alignment = "CENTER"
-
-        for tab_name in get_tab_names():
-            row = layout.row()
-            row.label(text=tab_name)
-            is_visible = get_tab_visibility(tab_name)
-            icon = "HIDE_OFF" if is_visible else "HIDE_ON"
-            op = row.operator("bim.toggle_tab_visibility", text="", icon=icon)
-            op.tab_name = tab_name
-
     def execute(self, context):
-        return {"FINISHED"}
+        from bonsai.bim.prop import get_tab
 
-    def invoke(self, context, event):
-        return context.window_manager.invoke_popup(self)
+        bprops = tool.Blender.get_bim_props()
+        bprops.tab_visibilities.clear()
+        bprops.panel_visibilities.clear()
+        tabs = [item[0] for item in get_tab(None, None) if item and item[0] != "BLENDER"]
+        for tab in tabs:
+            new = bprops.tab_visibilities.add()
+            new.name = tab
 
-
-class BIM_OT_toggle_tab_visibility(bpy.types.Operator):
-    """Toggle Tab Visibility"""
-
-    bl_idname = "bim.toggle_tab_visibility"
-    bl_label = "Toggle Tab Visibility"
-    bl_options = {"REGISTER", "UNDO"}
-
-    tab_name: bpy.props.StringProperty()
-
-    def execute(self, context):
-        if self.tab_name in get_tab_names():
-            current_visibility = get_tab_visibility(self.tab_name)
-            set_tab_visibility(self.tab_name, not current_visibility)
-
-        for area in bpy.context.window.screen.areas:
-            if area.type == "PROPERTIES":
-                area.tag_redraw()
-
-        self.report({"INFO"}, f"Toggled visibility for {self.tab_name}.")
+        for attr_name in dir(bpy.types):
+            if attr_name.startswith("BIM_PT_tab_"):
+                panel_class = getattr(bpy.types, attr_name)
+                if not hasattr(panel_class, "bl_idname"):
+                    assert False, panel_class
+                new = bprops.panel_visibilities.add()
+                new.name = panel_class.bl_idname
+                new.label = panel_class.bl_label
+                new.tab_name = panel_class.bim_tab_name
         return {"FINISHED"}
 
 
@@ -1980,29 +1767,8 @@ class BIM_OT_reset_ui_layout(bpy.types.Operator):
     bl_options = {"REGISTER", "UNDO"}
 
     def execute(self, context):
-
-        for tab_name in get_tab_names():
-            set_tab_visibility(tab_name, True)
-
-        get_all_tab_panels()["BOOKMARK"] = [{}]
-
-        for tab_name, panels in get_all_tab_panels().items():
-            for panel in panels:
-                panel_name = panel.get("bl_idname", "")
-                if not panel_name:
-                    continue
-
-                show_prop_name = f"show_{panel_name.lower()}"
-                if hasattr(context.scene, show_prop_name):
-                    setattr(context.scene, show_prop_name, True)
-
-                bookmark_prop_name = f"bookmark_{panel_name.lower()}"
-                if hasattr(context.scene, bookmark_prop_name):
-                    setattr(context.scene, bookmark_prop_name, False)
-
-        for area in bpy.context.window.screen.areas:
-            if area.type == "PROPERTIES":
-                area.tag_redraw()
-
-        self.report({"INFO"}, "UI layout reset to default.")
+        bprops = tool.Blender.get_bim_props()
+        bprops.tab_visibilities.clear()
+        bprops.panel_visibilities.clear()
+        bonsai.bim.handler.refresh_ui_data()
         return {"FINISHED"}

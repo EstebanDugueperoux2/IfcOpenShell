@@ -17,20 +17,23 @@
 # along with Bonsai.  If not, see <http://www.gnu.org/licenses/>.
 
 from __future__ import annotations
-import bpy
+
 import json
-import lark
-import bonsai.tool as tool
-import bonsai.core.tool
+from itertools import cycle
+from typing import TYPE_CHECKING, Literal, Union
+
+import bpy
 import ifcopenshell.guid
 import ifcopenshell.util.selector
-from itertools import cycle
+import lark
+
+import bonsai.core.tool
+import bonsai.tool as tool
 from bonsai.bim.prop import BIMFacet
-from typing import Union, Literal, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from bonsai.bim.prop import BIMFilterGroup
     from bonsai.bim.module.search.prop import BIMSearchProperties
+    from bonsai.bim.prop import BIMFilterGroup
 
 
 class Search(bonsai.core.tool.Search):
@@ -132,10 +135,7 @@ class Search(bonsai.core.tool.Search):
             else:
                 value = ifc_filter.value
 
-            if (
-                preferences.chain_filter_with_set_operations
-                or preferences.default_filter_with_set_operations_for_globalid_and_class
-            ):
+            if preferences.chain_filter_with_set_operations:
                 value = value.lstrip("!")
                 if ifc_filter.filter_mode == "SUBTRACT":
                     value = f"!{value}"
@@ -144,10 +144,7 @@ class Search(bonsai.core.tool.Search):
         elif ifc_filter.type == "entity":
             value = ifc_filter.value
 
-            if (
-                preferences.chain_filter_with_set_operations
-                or preferences.default_filter_with_set_operations_for_globalid_and_class
-            ):
+            if preferences.chain_filter_with_set_operations:
                 value = value.lstrip("!")
                 if ifc_filter.filter_mode == "SUBTRACT":
                     value = f"!{value}"
@@ -215,19 +212,10 @@ class Search(bonsai.core.tool.Search):
                 if filter_index == 0:
                     mode = "ADD"
                 else:
-                    if ifc_filter.type in ["entity", "instance"]:
-                        if (
-                            preferences.chain_filter_with_set_operations
-                            or preferences.default_filter_with_set_operations_for_globalid_and_class
-                        ):
-                            mode = ifc_filter.filter_mode
-                        else:
-                            mode = "FILTER" if group_results else "ADD"
+                    if preferences.chain_filter_with_set_operations:
+                        mode = ifc_filter.filter_mode
                     else:
-                        if preferences.chain_filter_with_set_operations:
-                            mode = ifc_filter.filter_mode
-                        else:
-                            mode = "FILTER" if group_results else "ADD"
+                        mode = "FILTER" if group_results else "ADD"
 
                 if mode == "ADD":
                     results = ifcopenshell.util.selector.filter_elements(tool.Ifc.get(), query)

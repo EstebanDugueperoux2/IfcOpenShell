@@ -17,60 +17,63 @@
 # along with Bonsai.  If not, see <http://www.gnu.org/licenses/>.
 
 from __future__ import annotations
-import os
-import re
+
 import collections
 import collections.abc
-import bpy
-import math
 import json
-import lark
-import bmesh
-import shutil
 import logging
-import shapely
+import math
+import os
 import platform
-import mathutils
+import re
+import shutil
 import subprocess
-import numpy as np
-import bonsai.core.tool
-import bonsai.core.geometry
-import bonsai.core.type
-import bonsai.tool as tool
+from collections.abc import Iterable, Sequence
+from fractions import Fraction
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple, Optional, Union
+
+import bmesh
+import bpy
 import ifcopenshell.api
-import ifcopenshell.api.geometry
 import ifcopenshell.api.context
-import ifcopenshell.api.drawing
 import ifcopenshell.api.document
+import ifcopenshell.api.drawing
+import ifcopenshell.api.geometry
 import ifcopenshell.api.pset
 import ifcopenshell.api.root
 import ifcopenshell.geom
-import ifcopenshell.util.placement
-import ifcopenshell.util.unit
-import ifcopenshell.util.representation
 import ifcopenshell.util.element
+import ifcopenshell.util.placement
+import ifcopenshell.util.representation
 import ifcopenshell.util.selector
 import ifcopenshell.util.shape
+import ifcopenshell.util.unit
+import lark
+import mathutils
+import numpy as np
+import shapely
+from ifcopenshell.util.shape_builder import ShapeBuilder
+from lxml import etree
+from mathutils import Matrix, Vector
+from shapely.ops import unary_union
+
 import bonsai.bim.helper
 import bonsai.bim.import_ifc
+import bonsai.core.geometry
 import bonsai.core.root
-from shapely.ops import unary_union
-from lxml import etree
-from mathutils import Vector, Matrix
-from fractions import Fraction
-from typing import Optional, Union, Any, Literal, TYPE_CHECKING, NamedTuple
-from collections.abc import Iterable, Sequence
-from pathlib import Path
-from ifcopenshell.util.shape_builder import ShapeBuilder
+import bonsai.core.tool
+import bonsai.core.type
+import bonsai.tool as tool
 
 if TYPE_CHECKING:
     from bonsai.bim.module.drawing.prop import (
+        BIMAnnotationProperties,
+        BIMAssignedProductProperties,
+        BIMCameraProperties,
+        BIMTextProperties,
         DocProperties,
         Sheet,
-        BIMAnnotationProperties,
-        BIMTextProperties,
-        BIMCameraProperties,
-        BIMAssignedProductProperties,
     )
     from bonsai.bim.module.drawing.prop import Drawing as DrawingProperties
 
@@ -832,43 +835,12 @@ class Drawing(bonsai.core.tool.Drawing):
         return props.is_editing_sheets
 
     @classmethod
-    def synchronise_ifc_and_text_attributes(cls, obj: bpy.types.Object) -> None:
+    def edit_text_literals(cls, obj: bpy.types.Object, literal_attributes: dict) -> None:
         assert (element := tool.Ifc.get_entity(obj))
         assert (rep := cls.get_annotation_representation(element))
-
-        old_literals = cls.get_text_literal(obj, return_list=True)
-        assert isinstance(old_literals, list)
-        literals_attributes = cls.export_text_literal_attributes(obj)
-        props = cls.get_text_props(obj)
-        defined_ifc_ids = [l.ifc_definition_id for l in props.literals]
-        ifc_file = tool.Ifc.get()
-
-        added_literals: list[ifcopenshell.entity_instance] = []
-        new_literals: list[ifcopenshell.entity_instance] = []
-        for ifc_definition_id, attributes in zip(defined_ifc_ids, literals_attributes):
-            # making sure all literals from text edit exist in ifc
-            if ifc_definition_id == 0:
-                literal = cls.add_literal(**attributes)
-                added_literals.append(literal)
-            else:
-                literal = ifc_file.by_id(ifc_definition_id)
-                ifcopenshell.api.drawing.edit_text_literal(
-                    ifc_file,
-                    text_literal=literal,
-                    attributes=attributes,
-                )
-            new_literals.append(literal)
-
-        removed_literals = set(old_literals) - set(new_literals)
-
-        # Add new literals and keep the order as defined in text props.
-        items = [i for i in rep.Items if i not in removed_literals] + added_literals
-        items.sort(key=lambda x: new_literals.index(x) if x in new_literals else -1)
-        rep.Items = items
-
-        # Remove from ifc the literals that were removed during the edit.
-        for literal in removed_literals:
-            ifcopenshell.util.element.remove_deep2(ifc_file, literal)
+        for literal in cls.get_text_literal(obj, return_list=True):
+            ifcopenshell.util.element.remove_deep2(tool.Ifc.get(), literal)
+        rep.Items = [cls.add_literal(**a) for a in literal_attributes]
 
     @classmethod
     def add_literal(cls, **attributes: str) -> ifcopenshell.entity_instance:
@@ -1276,7 +1248,7 @@ class Drawing(bonsai.core.tool.Drawing):
 
     @classmethod
     def run_type_assign_type(cls, element: ifcopenshell.entity_instance, relating_type: ifcopenshell.entity_instance):
-        return bonsai.core.type.assign_type(tool.Ifc, tool.Type, element=element, type=relating_type)
+        return bonsai.core.type.assign_type(tool.Ifc, tool.Model, tool.Type, element=element, type=relating_type)
 
     @classmethod
     def reload_representation(cls, obj: bpy.types.Object, representation: ifcopenshell.entity_instance):
@@ -2119,17 +2091,12 @@ class Drawing(bonsai.core.tool.Drawing):
 
         for command in re.findall("``.*?``", text):
             original_command = command
-            for variable in re.findall("{{.*?}}", command):
-                value = ifcopenshell.util.selector.get_element_value(product, variable[2:-2])
-                value = '"' + str(value).replace('"', '\\"') + '"'
-                command = command.replace(variable, value)
-            # Defensive: skip if command[2:-2] is None or 'None'
             command_content = command[2:-2]
             if command_content is None or str(command_content).strip().lower() == "none":
                 text = text.replace(original_command, "")
             else:
                 try:
-                    text = text.replace(original_command, ifcopenshell.util.selector.format(command_content))
+                    text = text.replace(original_command, ifcopenshell.util.selector.format(command_content, product))
                 except Exception:
                     text = text.replace(original_command, "")
         for variable in re.findall("{{.*?}}", text):
@@ -2798,8 +2765,9 @@ class Drawing(bonsai.core.tool.Drawing):
 
     @classmethod
     def convert_svg_to_dxf(cls, svg_filepath: Path, dxf_filepath: Path) -> None:
-        import ezdxf
         import xml.etree.ElementTree as ET
+
+        import ezdxf
 
         SVG = "{http://www.w3.org/2000/svg}"
         IFC = "{http://www.ifcopenshell.org/ns}"

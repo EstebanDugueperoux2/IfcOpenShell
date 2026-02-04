@@ -17,31 +17,34 @@
 # along with Bonsai.  If not, see <http://www.gnu.org/licenses/>.
 
 from __future__ import annotations
+
 import os
-import types
-import bpy
-import pytest
-import shutil
 import pprint
+import shutil
 import traceback
+import types
 import webbrowser
-import numpy as np
-import test.bim.stub
+from collections.abc import Generator
+from inspect import signature
+from math import radians
+from pathlib import Path
+from typing import Any, Union
+
+import bpy
 import ifcopenshell
 import ifcopenshell.util.element
 import ifcopenshell.util.representation
-import bonsai.tool as tool
-import bonsai.bim.handler
-from collections.abc import Generator
-from bonsai.bim.ifc import IfcStore
-from bonsai.tool.brick import BrickStore
-from bonsai.bim.module.model.data import AuthoringData
-from pytest_bdd import scenarios, given, when, then, parsers
-from inspect import signature
+import numpy as np
+import pytest
 from mathutils import Vector
-from math import radians
-from pathlib import Path
-from typing import Union, Any
+from pytest_bdd import given, parsers, scenarios, then, when
+
+import bonsai.bim.handler
+import bonsai.tool as tool
+import test.bim.stub
+from bonsai.bim.ifc import IfcStore
+from bonsai.bim.module.model.data import AuthoringData
+from bonsai.tool.brick import BrickStore
 
 scenarios("feature")
 
@@ -96,7 +99,11 @@ class PanelSpy:
 
     def __getattr__(self, attr: str) -> PanelSpy | Any:
         self.spied_attr = attr
-        if annotation := self.blender_panel.__annotations__.get(attr, None):
+        try:
+            annotations = self.blender_panel.__annotations__
+        except AttributeError:
+            annotations = type(self.blender_panel).__annotations__
+        if annotation := annotations.get(attr, None):
             return annotation.keywords.get("default", None)  # An operator property
         if attr == "layout":
             return self
@@ -136,7 +143,11 @@ class PanelSpy:
             prop_type = props.bl_rna.properties[name].type
             enum_items = []
             if prop_type == "ENUM":
-                prop_keywords = props.__annotations__[name].keywords
+                try:
+                    annotations = props.__annotations__
+                except AttributeError:
+                    annotations = type(props).__annotations__
+                prop_keywords = annotations[name].keywords
                 items = prop_keywords.get("items")
                 if items is not None:
                     if isinstance(items, (list, tuple)):
@@ -329,7 +340,7 @@ def an_untestable_scenario():
 def an_empty_blender_session():
     IfcStore.purge()
     if not PYTEST_BLENDER_NO_BACKGROUND:
-        bpy.ops.wm.read_homefile(app_template="")
+        bpy.ops.wm.read_homefile(app_template="", use_factory_startup=True)
     if len(bpy.data.objects) > 0:
         bpy.data.batch_remove(bpy.data.objects)
         bpy.ops.outliner.orphans_purge(do_local_ids=True, do_linked_ids=True, do_recursive=True)

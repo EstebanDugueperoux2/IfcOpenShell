@@ -17,8 +17,10 @@
 # along with Bonsai.  If not, see <http://www.gnu.org/licenses/>.
 
 import bpy
-from . import ui, prop, operator, handler, gizmos, workspace
+
 import bonsai.tool as tool
+
+from . import gizmos, handler, operator, prop, ui, workspace
 
 classes = (
     operator.ActivateDrawing,
@@ -65,6 +67,17 @@ classes = (
     operator.EnableEditingText,
     operator.ExcludeAnnotation,
     operator.ExpandSheet,
+    operator.ToggleElementValuesPanel,
+    operator.ToggleElementValuesCategory,
+    operator.SelectElementValues,
+    operator.InsertFormattedLiteralPopup,
+    operator.AddElementValueRow,
+    operator.RemoveElementValueRow,
+    operator.ElementValueSuggestionsPopup,
+    operator.FormatElementValueRow,
+    operator.ApplyElementValueRowsToLiteral,
+    operator.ShowCategoryHelp,
+    operator.ShowElementValuesInstructions,
     operator.LoadDrawings,
     operator.LoadReferences,
     operator.LoadSchedules,
@@ -89,8 +102,10 @@ classes = (
     operator.SelectAllDrawings,
     operator.SelectAllSheets,
     operator.SelectAssignedProduct,
+    operator.SelectSimilarTextLiteralValue,
     operator.ToggleTargetView,
     operator.OpenDocumentationWebUi,
+    operator.FilterSelectedObjectsIfIntersectedByCamera,
     prop.Variable,
     prop.Drawing,
     prop.Document,
@@ -98,7 +113,9 @@ classes = (
     prop.Sheet,
     prop.DocProperties,
     prop.BIMCameraProperties,
+    prop.ElementValueRow,
     prop.LiteralProps,
+    prop.LiteralApplySettings,
     prop.BIMTextProperties,
     prop.BIMAssignedProductProperties,
     prop.BIMAnnotationProperties,

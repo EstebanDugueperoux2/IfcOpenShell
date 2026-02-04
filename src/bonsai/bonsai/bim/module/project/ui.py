@@ -17,19 +17,27 @@
 # along with Bonsai.  If not, see <http://www.gnu.org/licenses/>.
 
 from __future__ import annotations
-import bpy
+
 import os
-import ifcopenshell
-import bonsai.bim
-import bonsai.tool as tool
-from bonsai.bim.helper import prop_with_search, draw_attributes
-from bpy.types import Panel, Menu, UIList
-from bonsai.bim.ifc import IfcStore
-from bonsai.bim.module.project.data import ProjectData, LinksData
 from typing import TYPE_CHECKING
 
+import bpy
+import ifcopenshell
+from bpy.types import Menu, Panel, UIList
+
+import bonsai.bim
+import bonsai.tool as tool
+from bonsai.bim.helper import draw_attributes, prop_with_search
+from bonsai.bim.ifc import IfcStore
+from bonsai.bim.module.project.data import LinksData, ProjectData
+
 if TYPE_CHECKING:
-    from bonsai.bim.module.project.prop import LibraryElement, BIMProjectProperties, FilterCategory, Link
+    from bonsai.bim.module.project.prop import (
+        BIMProjectProperties,
+        FilterCategory,
+        LibraryElement,
+        Link,
+    )
 
 
 def file_import_menu(self, context):
@@ -338,9 +346,9 @@ class BIM_PT_project(Panel):
             else:
                 metadata_filename = os.path.basename(props.ifc_file) + suffix
             row = self.layout.row(align=True)
-            col = row.column()
-            col.enabled = False
-            col.label(text=f"Saving session data to: {metadata_filename}")
+            row.use_property_split = False
+            pprops = tool.Project.get_project_props()
+            row.prop(pprops, "should_save_metadata_for_this_file", text=f"Save session data to: {metadata_filename}")
 
 
 class BIM_PT_new_project_wizard(Panel):
@@ -368,20 +376,10 @@ class BIM_PT_new_project_wizard(Panel):
         row = self.layout.row()
         row.prop(props, "volume_unit", text="Volume Unit")
         row = self.layout.row()
+        row.prop(props, "mass_unit", text="Mass Unit")
+        row = self.layout.row()
+        row.prop(props, "time_unit", text="Time Unit")
         prop_with_search(self.layout, pprops, "template_file", text="Template")
-
-        if tool.Blender.get_addon_preferences().mass_time_units_in_wizard:
-            header, body = self.layout.panel("Mass and Time Units", default_closed=True)
-            if header:
-                header.label(text="Mass and Time Units")
-            if body:
-                label = "Add Mass and Time Units" if not props.add_mass_time_units else "Remove Mass and Time Units"
-                body.prop(props, "add_mass_time_units", toggle=True, text=label)
-                if props.add_mass_time_units:
-                    row = body.row()
-                    row.prop(props, "mass_unit", text="Mass Unit")
-                    row = body.row()
-                    row.prop(props, "time_unit", text="Time Unit")
 
         self.layout.use_property_split = True
         row = self.layout.row()

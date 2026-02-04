@@ -16,38 +16,39 @@
 # You should have received a copy of the GNU General Public License
 # along with Bonsai.  If not, see <http://www.gnu.org/licenses/>.
 
+import json
+import logging
+from collections import defaultdict
+from collections.abc import Sequence
+from math import pi, radians
+from typing import Any, Optional, Union, cast
+
+import bmesh
 import bpy
 import gpu
-import json
-import bmesh
-import shapely
-import logging
-import numpy as np
 import ifcopenshell
 import ifcopenshell.api
-import ifcopenshell.api.geometry
 import ifcopenshell.api.feature
+import ifcopenshell.api.geometry
 import ifcopenshell.api.root
 import ifcopenshell.geom
-import ifcopenshell.util.shape
 import ifcopenshell.util.element
-import ifcopenshell.util.shape_builder
 import ifcopenshell.util.placement
 import ifcopenshell.util.representation
+import ifcopenshell.util.shape
+import ifcopenshell.util.shape_builder
 import ifcopenshell.util.unit
-import bonsai.tool as tool
-import bonsai.core.geometry
-import bonsai.bim.import_ifc as import_ifc
-from collections import defaultdict
-from math import pi, radians
-from mathutils import Vector, Matrix, Euler
-from bpy.types import Operator
-from bpy.types import SpaceView3D
+import numpy as np
+import shapely
 from bpy.props import FloatProperty
+from bpy.types import Operator, SpaceView3D
 from bpy_extras.object_utils import AddObjectHelper, object_data_add
 from gpu_extras.batch import batch_for_shader
-from typing import Union, Optional, Any, cast
-from collections.abc import Sequence
+from mathutils import Euler, Matrix, Vector
+
+import bonsai.bim.import_ifc as import_ifc
+import bonsai.core.geometry
+import bonsai.tool as tool
 from bonsai.bim.module.drawing.decoration import DecoratorData
 
 
@@ -170,7 +171,7 @@ class FilledOpeningGenerator:
                 reuse_mapped_representation = True
             else:
                 representation = ifcopenshell.util.representation.resolve_representation(representation)
-        
+
         if not reuse_mapped_representation:
             # Check for library template before generating from filling
             template_rep = self.get_opening_template_from_type(filling)
@@ -191,25 +192,25 @@ class FilledOpeningGenerator:
                 MappingSource=existing_mapping_source,
                 MappingTarget=tool.Ifc.get().create_entity(
                     "IfcCartesianTransformationOperator3D",
-                    Axis1=tool.Ifc.get().create_entity("IfcDirection", DirectionRatios=(1., 0., 0.)),
-                    Axis2=tool.Ifc.get().create_entity("IfcDirection", DirectionRatios=(0., 1., 0.)),
-                    LocalOrigin=tool.Ifc.get().create_entity("IfcCartesianPoint", Coordinates=(0., 0., 0.)),
-                    Scale=1.,
-                    Axis3=tool.Ifc.get().create_entity("IfcDirection", DirectionRatios=(0., 0., 1.))
-                )
+                    Axis1=tool.Ifc.get().create_entity("IfcDirection", DirectionRatios=(1.0, 0.0, 0.0)),
+                    Axis2=tool.Ifc.get().create_entity("IfcDirection", DirectionRatios=(0.0, 1.0, 0.0)),
+                    LocalOrigin=tool.Ifc.get().create_entity("IfcCartesianPoint", Coordinates=(0.0, 0.0, 0.0)),
+                    Scale=1.0,
+                    Axis3=tool.Ifc.get().create_entity("IfcDirection", DirectionRatios=(0.0, 0.0, 1.0)),
+                ),
             )
             mapped_representation = tool.Ifc.get().create_entity(
                 "IfcShapeRepresentation",
                 ContextOfItems=context,
                 RepresentationIdentifier="Body",
                 RepresentationType="MappedRepresentation",
-                Items=[new_mapped_item]
+                Items=[new_mapped_item],
             )
         else:
             mapped_representation = ifcopenshell.api.geometry.map_representation(
                 tool.Ifc.get(), representation=representation
             )
-        
+
         ifcopenshell.api.geometry.assign_representation(
             tool.Ifc.get(), product=opening, representation=mapped_representation
         )
@@ -333,25 +334,25 @@ class FilledOpeningGenerator:
                 MappingSource=existing_mapping_source,
                 MappingTarget=tool.Ifc.get().create_entity(
                     "IfcCartesianTransformationOperator3D",
-                    Axis1=tool.Ifc.get().create_entity("IfcDirection", DirectionRatios=(1., 0., 0.)),
-                    Axis2=tool.Ifc.get().create_entity("IfcDirection", DirectionRatios=(0., 1., 0.)),
-                    LocalOrigin=tool.Ifc.get().create_entity("IfcCartesianPoint", Coordinates=(0., 0., 0.)),
-                    Scale=1.,
-                    Axis3=tool.Ifc.get().create_entity("IfcDirection", DirectionRatios=(0., 0., 1.))
-                )
+                    Axis1=tool.Ifc.get().create_entity("IfcDirection", DirectionRatios=(1.0, 0.0, 0.0)),
+                    Axis2=tool.Ifc.get().create_entity("IfcDirection", DirectionRatios=(0.0, 1.0, 0.0)),
+                    LocalOrigin=tool.Ifc.get().create_entity("IfcCartesianPoint", Coordinates=(0.0, 0.0, 0.0)),
+                    Scale=1.0,
+                    Axis3=tool.Ifc.get().create_entity("IfcDirection", DirectionRatios=(0.0, 0.0, 1.0)),
+                ),
             )
             mapped_representation = tool.Ifc.get().create_entity(
                 "IfcShapeRepresentation",
                 ContextOfItems=context,
                 RepresentationIdentifier="Body",
                 RepresentationType="MappedRepresentation",
-                Items=[new_mapped_item]
+                Items=[new_mapped_item],
             )
         else:
             mapped_representation = ifcopenshell.api.geometry.map_representation(
                 tool.Ifc.get(), representation=representation_to_use
             )
-        
+
         ifcopenshell.api.geometry.assign_representation(
             tool.Ifc.get(), product=opening, representation=mapped_representation
         )

@@ -17,13 +17,15 @@
 # along with Bonsai.  If not, see <http://www.gnu.org/licenses/>.
 
 from __future__ import annotations
+
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional, Union, Literal
+from typing import TYPE_CHECKING, Literal, Optional, Union
 
 if TYPE_CHECKING:
     import bpy
     import ifcopenshell
     import ifcopenshell.util.representation
+
     import bonsai.tool as tool
 
 
@@ -36,11 +38,14 @@ def disable_editing_text(drawing: type[tool.Drawing], obj: bpy.types.Object) -> 
     drawing.disable_editing_text(obj)
 
 
-def edit_text(drawing: type[tool.Drawing], obj: bpy.types.Object) -> None:
-    drawing.synchronise_ifc_and_text_attributes(obj)
-    drawing.update_text_size_pset(obj)
-    drawing.update_text_annotation_properties(obj)
-    drawing.disable_editing_text(obj)
+def edit_text(drawing: type[tool.Drawing], attribute_obj: bpy.types.Object, apply_objs: list[bpy.types.Object]) -> None:
+    literal_attributes = drawing.export_text_literal_attributes(attribute_obj)
+    for obj in apply_objs:
+        drawing.edit_text_literals(obj, literal_attributes)
+        # TODO: font size should be part of a separate set of formatting controls, not part of text editing
+        drawing.update_text_size_pset(obj)
+        drawing.update_text_annotation_properties(obj)
+        drawing.disable_editing_text(obj)
 
 
 def enable_editing_assigned_product(drawing: type[tool.Drawing], obj: bpy.types.Object) -> None:
@@ -402,7 +407,7 @@ def update_drawing_name(
     camera = ifc.get_object(drawing)
     if camera and camera.name != name:
         camera.name = name
-    
+
     group = drawing_tool.get_drawing_group(drawing)
     if drawing_tool.get_name(group) != name:
         ifc.run("attribute.edit_attributes", product=group, attributes={"Name": name})
